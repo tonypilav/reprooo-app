@@ -6,6 +6,6 @@ class MaskPreviewRequest(BaseModel):
 
 
 class MaskPreviewResponse(BaseModel):
+    session_id: str
     masked_text: str
-    mapping: dict[str, str]
     
