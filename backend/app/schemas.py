@@ -8,4 +8,12 @@ class MaskPreviewRequest(BaseModel):
 class MaskPreviewResponse(BaseModel):
     session_id: str
     masked_text: str
+
     
+class GenerateDraftRequest(BaseModel):
+    session_id: str
+    masked_text: str
+
+
+class GenerateDraftResponse(BaseModel):
+    draft: str
