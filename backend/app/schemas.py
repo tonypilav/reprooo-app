@@ -17,3 +17,4 @@ class GenerateDraftRequest(BaseModel):
 
 class GenerateDraftResponse(BaseModel):
     draft: dict[str, str]
+    missing_fields: list[str]

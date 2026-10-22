@@ -10,9 +10,10 @@ from app.schemas import (
     MaskPreviewResponse,
 )
 from app.session_store import SessionStore
+from app.validation import Validator
 
 app = FastAPI()
-orchestrator = Orchestrator(Masker(), SessionStore(), LLMClient())
+orchestrator = Orchestrator(Masker(), SessionStore(), LLMClient(), Validator())
 
 
 @app.get("/api/health")
@@ -29,10 +30,12 @@ def mask_preview(request: MaskPreviewRequest):
 @app.post("/api/generate-draft", response_model=GenerateDraftResponse)
 def generate_draft(request: GenerateDraftRequest):
     try:
-        draft = orchestrator.generate_draft(request.session_id, request.masked_text)
+        draft, missing_fields = orchestrator.generate_draft(
+            request.session_id, request.masked_text
+        )
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
-    return GenerateDraftResponse(draft=draft)
+    return GenerateDraftResponse(draft=draft, missing_fields=missing_fields)
 
 
 @app.delete("/api/sessions/{session_id}")
