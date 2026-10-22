@@ -1,13 +1,12 @@
+from app.template_config import Template
+
+
 class LLMClient:
-    def generate_draft(self, masked_text: str) -> str:
-        return (
-            "Заголовок: Баг из обсуждения в треде\n"
-            "\n"
-            "Описание:\n"
-            f"{masked_text}\n"
-            "\n"
-            "Шаги воспроизведения: (заглушка)\n"
-            "Ожидаемый результат: (заглушка)\n"
-            "Фактический результат: (заглушка)\n"
-        )
+    def generate_draft(self, masked_text: str, template: Template) -> dict[str, str]:
+        draft = {field.key: "" for field in template.fields}
+        draft["title"] = "Баг из обсуждения в треде"
+        draft["steps"] = "1. (заглушка)"
+        draft["actual_result"] = masked_text
+        return draft
+
     

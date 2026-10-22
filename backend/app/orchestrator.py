@@ -1,6 +1,7 @@
 from app.llm_client import LLMClient
 from app.masking import Masker
 from app.session_store import SessionStore
+from app.template_config import get_template
 
 
 class SessionNotFoundError(Exception):
@@ -23,12 +24,19 @@ class Orchestrator:
         session_id = self._session_store.create(mapping)
         return session_id, masked_text
 
-    def generate_draft(self, session_id: str, masked_text: str) -> str:
+    
+    def generate_draft(
+    self, session_id: str, masked_text: str, mode: str = "bug"
+    ) -> dict[str, str]:
         mapping = self._session_store.get(session_id)
         if mapping is None:
             raise SessionNotFoundError(session_id)
-        draft_with_masks = self._llm_client.generate_draft(masked_text)
-        return self._masker.unmask(draft_with_masks, mapping)
+        template = get_template(mode)
+        draft_with_masks = self._llm_client.generate_draft(masked_text, template)
+        return {
+            key: self._masker.unmask(value, mapping)
+            for key, value in draft_with_masks.items()
+        }
 
     def delete_session(self, session_id: str) -> None:
         if self._session_store.get(session_id) is None:

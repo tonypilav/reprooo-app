@@ -16,4 +16,4 @@ class GenerateDraftRequest(BaseModel):
 
 
 class GenerateDraftResponse(BaseModel):
-    draft: str
+    draft: dict[str, str]
