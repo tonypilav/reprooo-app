@@ -26,3 +26,23 @@ export async function generateDraft(sessionId, maskedText) {
   }
   return response.json();
 }
+
+export async function getTemplate(mode) {
+  const response = await fetch(`${API_URL}/api/templates/${mode}`);
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить шаблон");
+  }
+  return response.json();
+}
+
+export async function createTicket(sessionId, draft) {
+  const response = await fetch(`${API_URL}/api/create-ticket`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, draft }),
+  });
+  if (!response.ok) {
+    throw new Error("Запрос завершился ошибкой");
+  }
+  return response.json();
+}

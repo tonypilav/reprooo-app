@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { generateDraft, maskPreview } from "./api";
+import { generateDraft, getTemplate, maskPreview } from "./api";
+import DraftEditor from "./DraftEditor";
 
 function App() {
   const [text, setText] = useState("");
   const [sessionId, setSessionId] = useState(null);
   const [maskedText, setMaskedText] = useState("");
   const [draftResult, setDraftResult] = useState(null);
+  const [template, setTemplate] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -30,7 +32,9 @@ function App() {
     setError("");
     try {
       const data = await generateDraft(sessionId, maskedText);
+      const loadedTemplate = await getTemplate("bug");
       setDraftResult(data);
+      setTemplate(loadedTemplate);
     } catch (e) {
       if (e.message === "SESSION_EXPIRED") {
         setError("Сессия истекла. Вернитесь назад и замаскируйте текст заново.");
@@ -46,6 +50,7 @@ function App() {
     setSessionId(null);
     setMaskedText("");
     setDraftResult(null);
+    setTemplate(null);
     setError("");
   }
 
@@ -100,16 +105,12 @@ function App() {
       )}
 
       {step === "draft" && (
-        <div>
-          <h2>Черновик (пока в сыром виде)</h2>
-          <pre style={{ whiteSpace: "pre-wrap" }}>
-            {JSON.stringify(draftResult.draft, null, 2)}
-          </pre>
-          <p>
-            Не хватает полей: {draftResult.missing_fields.join(", ") || "нет"}
-          </p>
-          <button onClick={handleReset}>Начать заново</button>
-        </div>
+        <DraftEditor
+          template={template}
+          initialDraft={draftResult.draft}
+          sessionId={sessionId}
+          onReset={handleReset}
+        />
       )}
     </div>
   );

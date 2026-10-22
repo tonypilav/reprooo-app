@@ -11,11 +11,15 @@ from app.schemas import (
     MaskPreviewResponse,
     CreateTicketRequest,
     CreateTicketResponse,
+    TemplateResponse,
+    TemplateFieldResponse,
 )
 from app.session_store import SessionStore
 from app.validation import Validator
 from app.jira_adapter import JiraAdapter
 from fastapi.middleware.cors import CORSMiddleware
+from app.template_config import get_template
+
 
 
 app = FastAPI()
@@ -31,6 +35,25 @@ orchestrator = Orchestrator(Masker(), SessionStore(), LLMClient(), Validator(), 
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/api/templates/{mode}", response_model=TemplateResponse)
+def read_template(mode: str):
+    try:
+        template = get_template(mode)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return TemplateResponse(
+        mode=template.mode,
+        fields=[
+            TemplateFieldResponse(
+                key=field.key,
+                label=field.label,
+                required=field.required,
+                hint=field.hint,
+            )
+            for field in template.fields
+        ],
+    )
 
 
 @app.post("/api/mask-preview", response_model=MaskPreviewResponse)

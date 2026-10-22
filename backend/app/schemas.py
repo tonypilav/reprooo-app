@@ -30,3 +30,15 @@ class CreateTicketResponse(BaseModel):
     url: str
     summary: str
     description: str
+
+
+class TemplateFieldResponse(BaseModel):
+    key: str
+    label: str
+    required: bool
+    hint: str
+
+
+class TemplateResponse(BaseModel):
+    mode: str
+    fields: list[TemplateFieldResponse]
