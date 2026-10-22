@@ -18,3 +18,15 @@ class GenerateDraftRequest(BaseModel):
 class GenerateDraftResponse(BaseModel):
     draft: dict[str, str]
     missing_fields: list[str]
+
+
+class CreateTicketRequest(BaseModel):
+    session_id: str
+    draft: dict[str, str]
+
+
+class CreateTicketResponse(BaseModel):
+    key: str
+    url: str
+    summary: str
+    description: str

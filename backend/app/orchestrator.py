@@ -1,12 +1,20 @@
+from statistics import mode
+
 from app.llm_client import LLMClient
 from app.masking import Masker
 from app.session_store import SessionStore
 from app.template_config import get_template
 from app.validation import Validator
+from app.jira_adapter import CreatedTicket, JiraAdapter
 
 
 class SessionNotFoundError(Exception):
     pass
+
+class IncompleteDraftError(Exception):
+    def __init__(self, missing_fields: list[str]):
+        super().__init__("Draft is incomplete")
+        self.missing_fields = missing_fields
 
 
 class Orchestrator:
@@ -16,11 +24,13 @@ class Orchestrator:
         session_store: SessionStore,
         llm_client: LLMClient,
         validator: Validator,
+        jira_adapter: JiraAdapter,
     ):
         self._masker = masker
         self._session_store = session_store
         self._llm_client = llm_client
         self._validator = validator
+        self._jira_adapter = jira_adapter
 
     def mask_preview(self, text: str) -> tuple[str, str]:
         masked_text, mapping = self._masker.mask(text)
@@ -42,6 +52,17 @@ class Orchestrator:
         missing_fields = self._validator.find_missing(draft, template)
 
         return draft, missing_fields
+
+    def create_ticket(
+        self, session_id: str, draft: dict[str, str], mode: str = "bug"
+    ) -> CreatedTicket:
+        template = get_template(mode)
+        missing_fields = self._validator.find_missing(draft, template)
+        if missing_fields:
+            raise IncompleteDraftError(missing_fields)
+        ticket = self._jira_adapter.create_ticket(draft, template)
+        self._session_store.delete(session_id)
+        return ticket
 
     def delete_session(self, session_id: str) -> None:
         if self._session_store.get(session_id) is None:
