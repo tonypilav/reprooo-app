@@ -15,9 +15,16 @@ from app.schemas import (
 from app.session_store import SessionStore
 from app.validation import Validator
 from app.jira_adapter import JiraAdapter
+from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 orchestrator = Orchestrator(Masker(), SessionStore(), LLMClient(), Validator(), JiraAdapter())
 
 
