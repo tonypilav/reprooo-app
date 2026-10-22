@@ -1,6 +1,24 @@
 import { useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Container,
+  Group,
+  Image,
+  Paper,
+  Stack,
+  Stepper,
+  Text,
+  Textarea,
+  Title,
+} from "@mantine/core";
 import { generateDraft, getTemplate, maskPreview } from "./api";
 import DraftEditor from "./DraftEditor";
+import { t } from "./texts";
+import logo from "./assets/logo.png";
+
+const STEP_INDEX = { input: 0, preview: 1, draft: 2 };
 
 function App() {
   const [text, setText] = useState("");
@@ -21,7 +39,7 @@ function App() {
       setSessionId(data.session_id);
       setMaskedText(data.masked_text);
     } catch {
-      setError("Не удалось замаскировать текст. Проверьте, что бэкенд запущен.");
+      setError(t.errors.mask);
     } finally {
       setLoading(false);
     }
@@ -37,9 +55,9 @@ function App() {
       setTemplate(loadedTemplate);
     } catch (e) {
       if (e.message === "SESSION_EXPIRED") {
-        setError("Сессия истекла. Вернитесь назад и замаскируйте текст заново.");
+        setError(t.errors.sessionExpired);
       } else {
-        setError("Не удалось сгенерировать черновик.");
+        setError(t.errors.generate);
       }
     } finally {
       setLoading(false);
@@ -55,64 +73,96 @@ function App() {
   }
 
   return (
-    <div>
-      <h1>Reprooo</h1>
+    <Box bg="dark.8" mih="100vh" py="xl">
+      <Container size="sm">
+        <Stack gap="xl">
+          <Group gap="sm" wrap="nowrap">
+            <Image src={logo} alt={t.appName} w={80} h={80} />
+            <div>
+              <Title order={1}>{t.appName}</Title>
+              <Text c="dimmed">{t.tagline}</Text>
+            </div>
+          </Group>
 
-      {error && <p>{error}</p>}
+          <Stepper active={STEP_INDEX[step]} size="sm">
+            <Stepper.Step label={t.steps.input} />
+            <Stepper.Step label={t.steps.preview} />
+            <Stepper.Step label={t.steps.draft} />
+          </Stepper>
 
-      {step === "input" && (
-        <div>
-          <textarea
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            rows={10}
-            cols={60}
-            placeholder="Вставьте текст треда"
-          />
-          <div>
-            <button onClick={handleMask} disabled={loading || !text.trim()}>
-              {loading ? "Маскирую..." : "Замаскировать"}
-            </button>
-          </div>
-        </div>
-      )}
+          {error && (
+            <Alert color="red" variant="light">
+              {error}
+            </Alert>
+          )}
 
-      {step === "preview" && (
-        <div>
-          <h2>Что уйдёт в LLM</h2>
-          <p>
-            Проверьте текст. Метки вроде [EMAIL_1] нужны, чтобы вернуть настоящие
-            данные в черновике, поэтому не удаляйте их.
-          </p>
-          <textarea
-            value={maskedText}
-            onChange={(event) => setMaskedText(event.target.value)}
-            rows={10}
-            cols={60}
-          />
-          <div>
-            <button onClick={handleReset} disabled={loading}>
-              Назад
-            </button>
-            <button
-              onClick={handleGenerate}
-              disabled={loading || !maskedText.trim()}
-            >
-              {loading ? "Генерирую..." : "Сгенерировать черновик"}
-            </button>
-          </div>
-        </div>
-      )}
+          <Paper>
+            {step === "input" && (
+              <Stack>
+                <Textarea
+                  label={t.input.title}
+                  description={t.input.description}
+                  placeholder={t.input.placeholder}
+                  value={text}
+                  onChange={(event) => setText(event.currentTarget.value)}
+                  autosize
+                  minRows={8}
+                  maxRows={16}
+                />
+                <Group justify="flex-end">
+                  <Button
+                    onClick={handleMask}
+                    loading={loading}
+                    disabled={!text.trim()}
+                  >
+                    {t.input.action}
+                  </Button>
+                </Group>
+              </Stack>
+            )}
 
-      {step === "draft" && (
-        <DraftEditor
-          template={template}
-          initialDraft={draftResult.draft}
-          sessionId={sessionId}
-          onReset={handleReset}
-        />
-      )}
-    </div>
+            {step === "preview" && (
+              <Stack>
+                <Textarea
+                  label={t.preview.title}
+                  description={t.preview.hint}
+                  value={maskedText}
+                  onChange={(event) => setMaskedText(event.currentTarget.value)}
+                  autosize
+                  minRows={8}
+                  maxRows={16}
+                />
+                <Group justify="space-between">
+                  <Button
+                    variant="default"
+                    onClick={handleReset}
+                    disabled={loading}
+                  >
+                    {t.preview.back}
+                  </Button>
+                  <Button
+                    onClick={handleGenerate}
+                    loading={loading}
+                    disabled={!maskedText.trim()}
+                  >
+                    {t.preview.action}
+                  </Button>
+                </Group>
+              </Stack>
+            )}
+
+            {step === "draft" && (
+              <DraftEditor
+                template={template}
+                initialDraft={draftResult.draft}
+                sessionId={sessionId}
+                onReset={handleReset}
+              />
+            )}
+          </Paper>
+        </Stack>
+      </Container>
+    </Box>
   );
 }
 

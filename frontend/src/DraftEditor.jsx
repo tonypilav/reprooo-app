@@ -1,5 +1,17 @@
 import { useState } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Group,
+  Paper,
+  Stack,
+  Text,
+  Textarea,
+  Title,
+} from "@mantine/core";
 import { createTicket } from "./api";
+import { t } from "./texts";
 
 function DraftEditor({ template, initialDraft, sessionId, onReset }) {
   const [draft, setDraft] = useState(initialDraft);
@@ -22,7 +34,7 @@ function DraftEditor({ template, initialDraft, sessionId, onReset }) {
       const result = await createTicket(sessionId, draft);
       setTicket(result);
     } catch {
-      setError("Не удалось создать тикет.");
+      setError(t.errors.createTicket);
     } finally {
       setLoading(false);
     }
@@ -30,53 +42,63 @@ function DraftEditor({ template, initialDraft, sessionId, onReset }) {
 
   if (ticket) {
     return (
-      <div>
-        <h2>Тикет создан: {ticket.key}</h2>
-        <p>{ticket.summary}</p>
-        <pre style={{ whiteSpace: "pre-wrap" }}>{ticket.description}</pre>
-        <button onClick={onReset}>Начать заново</button>
-      </div>
+      <Stack>
+        <Group>
+          <Title order={3}>{t.editor.created}</Title>
+          <Badge size="lg">{ticket.key}</Badge>
+        </Group>
+        <Text fw={500}>{ticket.summary}</Text>
+        <Paper bg="dark.6" withBorder={false} p="md">
+          <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+            {ticket.description}
+          </Text>
+        </Paper>
+        <Group justify="flex-end">
+          <Button onClick={onReset}>{t.editor.reset}</Button>
+        </Group>
+      </Stack>
     );
   }
 
   return (
-    <div>
-      <h2>Черновик тикета</h2>
-      {error && <p>{error}</p>}
+    <Stack>
+      <Title order={3}>{t.editor.title}</Title>
 
-      {template.fields.map((field) => {
-        const isMissing = missing.includes(field.key);
-        return (
-          <div key={field.key}>
-            <label>
-              <strong>
-                {field.label}
-                {field.required ? " *" : ""}
-              </strong>
-              <div>{field.hint}</div>
-              <textarea
-                value={draft[field.key] || ""}
-                onChange={(event) => handleChange(field.key, event.target.value)}
-                rows={field.key === "title" ? 2 : 4}
-                cols={60}
-                style={{
-                  display: "block",
-                  border: isMissing ? "2px solid crimson" : undefined,
-                }}
-              />
-            </label>
-            {isMissing && <div>Заполните это поле</div>}
-          </div>
-        );
-      })}
+      {error && (
+        <Alert color="red" variant="light">
+          {error}
+        </Alert>
+      )}
 
-      <button onClick={onReset} disabled={loading}>
-        Начать заново
-      </button>
-      <button onClick={handleCreate} disabled={loading || missing.length > 0}>
-        {loading ? "Создаю..." : "Создать тикет"}
-      </button>
-    </div>
+      {template.fields.map((field) => (
+        <Textarea
+          key={field.key}
+          label={field.label}
+          description={field.hint}
+          withAsterisk={field.required}
+          value={draft[field.key] || ""}
+          onChange={(event) =>
+            handleChange(field.key, event.currentTarget.value)
+          }
+          error={missing.includes(field.key) ? t.editor.fillField : undefined}
+          autosize
+          minRows={field.key === "title" ? 1 : 3}
+        />
+      ))}
+
+      <Group justify="space-between">
+        <Button variant="default" onClick={onReset} disabled={loading}>
+          {t.editor.reset}
+        </Button>
+        <Button
+          onClick={handleCreate}
+          loading={loading}
+          disabled={missing.length > 0}
+        >
+          {t.editor.create}
+        </Button>
+      </Group>
+    </Stack>
   );
 }
 
