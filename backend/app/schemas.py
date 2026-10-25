@@ -3,11 +3,20 @@ from pydantic import BaseModel
 
 class MaskPreviewRequest(BaseModel):
     text: str
+    enabled_rules: list[str] | None = None
 
 
 class MaskPreviewResponse(BaseModel):
     session_id: str
     masked_text: str
+
+
+class MaskRuleResponse(BaseModel):
+    key: str
+    label: str
+    description: str
+    enabled_by_default: bool
+    locked: bool
 
     
 class GenerateDraftRequest(BaseModel):

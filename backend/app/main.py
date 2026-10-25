@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 
 from app.llm_client import LLMClient
 from app.masking import Masker
+from app.masking_config import MASK_RULES
 from app.jira_adapter import JiraAdapter
 from app.orchestrator import IncompleteDraftError, Orchestrator, SessionNotFoundError
 from app.schemas import (
@@ -9,6 +10,7 @@ from app.schemas import (
     GenerateDraftResponse,
     MaskPreviewRequest,
     MaskPreviewResponse,
+    MaskRuleResponse,
     CreateTicketRequest,
     CreateTicketResponse,
     TemplateResponse,
@@ -55,10 +57,25 @@ def read_template(mode: str):
         ],
     )
 
+@app.get("/api/mask-rules", response_model=list[MaskRuleResponse])
+def read_mask_rules():
+    return [
+        MaskRuleResponse(
+            key=rule.key,
+            label=rule.label,
+            description=rule.description,
+            enabled_by_default=rule.enabled_by_default,
+            locked=rule.locked,
+        )
+        for rule in MASK_RULES
+    ]
+
 
 @app.post("/api/mask-preview", response_model=MaskPreviewResponse)
 def mask_preview(request: MaskPreviewRequest):
-    session_id, masked_text = orchestrator.mask_preview(request.text)
+    session_id, masked_text = orchestrator.mask_preview(
+        request.text, request.enabled_rules
+    )
     return MaskPreviewResponse(session_id=session_id, masked_text=masked_text)
 
 

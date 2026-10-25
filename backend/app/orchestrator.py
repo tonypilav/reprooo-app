@@ -32,8 +32,11 @@ class Orchestrator:
         self._validator = validator
         self._jira_adapter = jira_adapter
 
-    def mask_preview(self, text: str) -> tuple[str, str]:
-        masked_text, mapping = self._masker.mask(text)
+    def mask_preview(
+        self, text: str, enabled_rules: list[str] | None = None
+    ) -> tuple[str, str]:
+        enabled_keys = set(enabled_rules) if enabled_rules is not None else None
+        masked_text, mapping = self._masker.mask(text, enabled_keys)
         session_id = self._session_store.create(mapping)
         return session_id, masked_text
 
