@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -13,7 +13,8 @@ import {
   Textarea,
   Title,
 } from "@mantine/core";
-import { generateDraft, getTemplate, maskPreview } from "./api";
+import { generateDraft, getMaskRules, getTemplate, maskPreview } from "./api";
+import MaskRuleToggles from "./MaskRuleToggles";
 import DraftEditor from "./DraftEditor";
 import { t } from "./texts";
 import logo from "./assets/logo.png";
@@ -22,6 +23,8 @@ const STEP_INDEX = { input: 0, preview: 1, draft: 2 };
 
 function App() {
   const [text, setText] = useState("");
+  const [rules, setRules] = useState([]);
+  const [enabledRules, setEnabledRules] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [maskedText, setMaskedText] = useState("");
   const [draftResult, setDraftResult] = useState(null);
@@ -31,11 +34,25 @@ function App() {
 
   const step = draftResult ? "draft" : sessionId ? "preview" : "input";
 
+  useEffect(() => {
+    getMaskRules()
+      .then((loaded) => {
+        setRules(loaded);
+        setEnabledRules(
+          loaded
+            .filter((rule) => rule.enabled_by_default || rule.locked)
+            .map((rule) => rule.key),
+        );
+      })
+      .catch(() => setError(t.errors.rules));
+  }, []);
+
+  
   async function handleMask() {
     setLoading(true);
     setError("");
     try {
-      const data = await maskPreview(text);
+      const data = await maskPreview(text, enabledRules);
       setSessionId(data.session_id);
       setMaskedText(data.masked_text);
     } catch {
@@ -108,7 +125,13 @@ function App() {
                   autosize
                   minRows={8}
                   maxRows={16}
-                />
+                />{rules.length > 0 && (
+                  <MaskRuleToggles
+                    rules={rules}
+                    value={enabledRules}
+                    onChange={setEnabledRules}
+                  />
+                  )}
                 <Group justify="flex-end">
                   <Button
                     onClick={handleMask}

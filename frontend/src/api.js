@@ -1,10 +1,18 @@
 const API_URL = "http://localhost:8000";
 
-export async function maskPreview(text) {
+export async function getMaskRules() {
+  const response = await fetch(`${API_URL}/api/mask-rules`);
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить правила маскирования");
+  }
+  return response.json();
+}
+
+export async function maskPreview(text, enabledRules) {
   const response = await fetch(`${API_URL}/api/mask-preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, enabled_rules: enabledRules }),
   });
   if (!response.ok) {
     throw new Error("Запрос завершился ошибкой");
