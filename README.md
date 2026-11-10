@@ -44,16 +44,16 @@ The user controls the number of refinement iterations and makes the final decisi
 
 ## Technology Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | React, JavaScript, Mantine, Vite |
-| Backend | Python, FastAPI, Pydantic |
-| LLM integration | OpenAI API |
-| Orchestration | Modular Python orchestration layer |
-| Sensitive-data handling | Configurable masking rules |
-| Session management | In-memory session store with TTL |
-| Task templates | Configuration-driven schemas |
-| Jira integration | Adapter pattern, mock implementation for MVP |
+| Layer                   | Technology                                   |
+| ----------------------- | -------------------------------------------- |
+| Frontend                | React, JavaScript, Mantine, Vite             |
+| Backend                 | Python, FastAPI, Pydantic                    |
+| LLM integration         | OpenAI API                                   |
+| Orchestration           | Modular Python orchestration layer           |
+| Sensitive-data handling | Configurable masking rules                   |
+| Session management      | In-memory session store with TTL             |
+| Task templates          | Configuration-driven schemas                 |
+| Jira integration        | Adapter pattern, mock implementation for MVP |
 
 ## Architecture
 
