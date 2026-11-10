@@ -10,10 +10,10 @@ import {
   Textarea,
   Title,
 } from "@mantine/core";
-import { createTicket } from "./api";
+import { createTicket, isSessionUnavailable } from "./api";
 import { t } from "./texts";
 
-function DraftEditor({ template, initialDraft, sessionId, onReset }) {
+function DraftEditor({ template, initialDraft, sessionId, onReset, onSessionUnavailable }) {
   const [draft, setDraft] = useState(initialDraft);
   const [ticket, setTicket] = useState(null);
   const [error, setError] = useState("");
@@ -28,13 +28,18 @@ function DraftEditor({ template, initialDraft, sessionId, onReset }) {
   }
 
   async function handleCreate() {
+    if (!sessionId) return;
     setLoading(true);
     setError("");
     try {
       const result = await createTicket(sessionId, draft);
       setTicket(result);
-    } catch {
-      setError(t.errors.createTicket);
+    } catch (error) {
+      if (isSessionUnavailable(error)) {
+        onSessionUnavailable();
+      } else {
+        setError(t.errors.createTicket);
+      }
     } finally {
       setLoading(false);
     }
@@ -93,7 +98,7 @@ function DraftEditor({ template, initialDraft, sessionId, onReset }) {
         <Button
           onClick={handleCreate}
           loading={loading}
-          disabled={missing.length > 0}
+          disabled={!sessionId || missing.length > 0}
         >
           {t.editor.create}
         </Button>

@@ -14,7 +14,7 @@ from app.main import app
 from app.masking import Masker, PLACEHOLDER, SanitizedText
 from app.masking_config import MASK_RULES
 from app.orchestrator import Orchestrator, PreviewReviewRequired
-from app.session_store import SessionStore
+from app.session_store import SessionStore, SessionUnavailableError
 from app.template_config import get_template
 from app.validation import Validator
 
@@ -230,13 +230,14 @@ class BoundaryTests(unittest.TestCase):
         self.assertNotIn("demo-ticket", repr(spy.create_ticket.call_args))
         self.assertNotIn("demo-ticket", repr(ticket))
 
-    def test_invalid_session_does_not_bypass_ticket_sanitization(self):
-        # Session validity enforcement is deliberately deferred to Task 2.
+    def test_invalid_session_rejected_before_jira(self):
         orchestrator = make_orchestrator()
+        orchestrator._jira_adapter = Mock()
         draft = complete_draft()
         draft["title"] = "api_key=demo-ticket"
-        ticket = orchestrator.create_ticket("not-a-session", draft)
-        self.assertNotIn("demo-ticket", repr(ticket))
+        with self.assertRaises(SessionUnavailableError):
+            orchestrator.create_ticket("A" * 22, draft)
+        orchestrator._jira_adapter.create_ticket.assert_not_called()
 
     def test_adapter_direct_calls_sanitized_before_storage(self):
         adapter = JiraAdapter()
@@ -326,7 +327,7 @@ class APITests(unittest.IsolatedAsyncioTestCase):
             route = "/api/mask-preview" if "text" in body else "/api/create-ticket"
             response = await self.client.post(route, json=body)
             self.assertEqual(response.status_code, 422)
-            self.assertEqual(response.json(), {"detail": "Invalid request"})
+            self.assertEqual(response.json(), {"detail": {"code": "INVALID_REQUEST", "message": "Invalid request"}})
         response = await self.client.post("/api/mask-preview", content='{"password=demo-json"', headers={"Content-Type": "application/json"})
         self.assertEqual(response.status_code, 422)
         self.assertNotIn("demo-json", response.text)

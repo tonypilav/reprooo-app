@@ -1,13 +1,10 @@
 from app.llm_client import LLMClient
 from app.masking import Masker
-from app.session_store import SessionStore
+from app.session_store import SessionReservation, SessionStore
 from app.template_config import get_template
 from app.validation import Validator
 from app.jira_adapter import CreatedTicket, JiraAdapter
 
-
-class SessionNotFoundError(Exception):
-    pass
 
 class PreviewReviewRequired(Exception):
     def __init__(self, masked_text: str):
@@ -44,44 +41,50 @@ class Orchestrator:
         session_id = self._session_store.create(context)
         return session_id, masked_text
 
-    def generate_draft(
-        self, session_id: str, masked_text: str, mode: str = "bug"
-    ) -> tuple[dict[str, str], list[str]]:
-        context = self._session_store.get(session_id)
-        if context is None:
-            raise SessionNotFoundError(session_id)
-        template = get_template(mode)
-        model_text = self._masker.for_model({"text": masked_text}, context)["text"]
-        if model_text.text != masked_text:
-            raise PreviewReviewRequired(model_text.text)
-        draft_with_masks = self._llm_client.generate_draft(model_text, template)
-        allowed = {field.key for field in template.fields}
-        if (not isinstance(draft_with_masks, dict)
-                or any(key not in allowed or not isinstance(value, str)
-                       for key, value in draft_with_masks.items())):
-            raise ValueError("Invalid generated draft")
-        draft = self._masker.sanitize_fields(draft_with_masks, context)
-        missing_fields = self._validator.find_missing(draft, template)
+    def admit_session(self, session_id: str) -> SessionReservation:
+        return self._session_store.admit(session_id)
 
+    def generate_draft(
+        self, session_id: str, masked_text: str, mode: str = "bug",
+        *, reservation: SessionReservation | None = None,
+    ) -> tuple[dict[str, str], list[str]]:
+        review_text = None
+        with self._session_store.operation(session_id, reservation=reservation) as context:
+            template = get_template(mode)
+            model_text = self._masker.for_model({"text": masked_text}, context)["text"]
+            if model_text.text != masked_text:
+                review_text = model_text.text
+            else:
+                draft_with_masks = self._llm_client.generate_draft(model_text, template)
+                allowed = {field.key for field in template.fields}
+                if (not isinstance(draft_with_masks, dict)
+                        or any(key not in allowed or not isinstance(value, str)
+                               for key, value in draft_with_masks.items())):
+                    raise ValueError("Invalid generated draft")
+                draft = self._masker.sanitize_fields(draft_with_masks, context)
+                missing_fields = self._validator.find_missing(draft, template)
+        # Review-required is successful activity: commit metadata/TTL before
+        # translating it to the existing user-facing response.
+        if review_text is not None:
+            raise PreviewReviewRequired(review_text)
         return draft, missing_fields
 
     def create_ticket(
-        self, session_id: str, draft: dict[str, str], mode: str = "bug"
+        self, session_id: str, draft: dict[str, str], mode: str = "bug",
+        *, reservation: SessionReservation | None = None,
     ) -> CreatedTicket:
-        template = get_template(mode)
-        # Security protection must not depend on session validity (Task 2).
-        context = self._session_store.get(session_id) or self._masker.context()
-        draft = self._masker.sanitize_fields(draft, context)
-        missing_fields = self._validator.find_missing(draft, template)
-        if missing_fields:
-            raise IncompleteDraftError(missing_fields)
-        ticket = self._jira_adapter.create_ticket(draft, template)
-        self._session_store.delete(session_id)
+        with self._session_store.operation(
+            session_id, consume=True, reservation=reservation
+        ) as context:
+            template = get_template(mode)
+            draft = self._masker.sanitize_fields(draft, context)
+            missing_fields = self._validator.find_missing(draft, template)
+            if missing_fields:
+                raise IncompleteDraftError(missing_fields)
+            ticket = self._jira_adapter.create_ticket(draft, template)
         return ticket
 
-    def delete_session(self, session_id: str) -> None:
-        if self._session_store.get(session_id) is None:
-            raise SessionNotFoundError(session_id)
-        self._session_store.delete(session_id)
-
-        
+    def delete_session(
+        self, session_id: str, *, reservation: SessionReservation | None = None
+    ) -> None:
+        self._session_store.delete(session_id, reservation=reservation)

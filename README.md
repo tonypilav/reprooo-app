@@ -146,10 +146,56 @@ chips remain configurable, while credential rules cannot be disabled.
 Editing a preview triggers another backend check. If it changes the text, the
 updated preview must be reviewed and submitted again before generation. The
 active generator remains a local stub; no live OpenAI integration is enabled.
-Session validity and expiry lifecycle improvements remain a separate task.
+Session validity and the expiry lifecycle are implemented as described below.
 
 Synthetic-only backend verification (using existing environment dependencies):
 
 ```sh
 PYTHONPATH=backend backend/.venv/bin/python -m unittest discover -s backend/tests -v
+```
+
+## In-memory session lifecycle
+
+Sessions expire after 900 seconds without a successful session-backed operation.
+Generation and sanitized-preview review refresh the deadline from completion;
+failures, lookups, cleanup, and passive browser editing do not. Successful mock
+submission consumes the session; explicit deletion removes it. A session is
+expired at its deadline, not one instant later.
+
+The three session-dependent API handlers admit requests asynchronously after
+request validation and before scheduling synchronous worker execution. This is
+API admission time, not exact HTTP socket arrival time. Eligibility is frozen
+against the deadline at admission: requests arriving at this step after expiry
+are rejected even while earlier work is running. An admitted request can wait
+for worker capacity and its session lock, then finish after the original deadline.
+It still must refer to the same session, not a deleted or consumed entry.
+
+A reservation pins each admitted operation against cleanup. Pending reservations
+belong to the API; cancellation releases unused admission without refreshing TTL.
+Once a worker claims a reservation, it owns release until processing finishes,
+including while it waits for the session lock. Cancelling the HTTP await cannot
+release that worker's pin or interrupt it midway through a session update.
+Already running work may still succeed (and refresh or consume the session) after
+the client stops waiting. Release is exactly once. Processing uses private masking
+metadata; failed work publishes no partial updates. Requests for one session are
+serialized, with no global lock held during generation or Jira processing.
+
+FastAPI lifespan performs an initial sweep and starts one cleanup task running
+every 30 seconds. It skips admitted work without waiting on operation locks. The
+task is cancelled and awaited on shutdown. Storage is single-process and lost
+on restart; use one application worker for the demo.
+
+Unknown, expired, deleted, and consumed session IDs return HTTP 404 with
+`detail.code = SESSION_UNAVAILABLE`. Missing or malformed IDs return safe HTTP
+422 `INVALID_REQUEST` errors. The UI disables further session actions while
+keeping the visible preview/draft. Explicit restart preserves the original
+context and masking selections, but discards the old preview/draft. No browser
+storage, heartbeat, automatic draft migration, or live integration is added.
+
+Frontend checks (from `frontend`):
+
+```sh
+node --test src/api.test.js
+npm run lint
+npm run build
 ```

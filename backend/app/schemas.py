@@ -1,6 +1,13 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
+
+from app.session_store import SESSION_ID_PATTERN
+
+
+SessionId = Annotated[str, StringConstraints(
+    strict=True, min_length=22, max_length=22, pattern=SESSION_ID_PATTERN
+)]
 
 
 class MaskPreviewRequest(BaseModel):
@@ -22,7 +29,7 @@ class MaskRuleResponse(BaseModel):
 
     
 class GenerateDraftRequest(BaseModel):
-    session_id: str
+    session_id: SessionId
     masked_text: str
 
 
@@ -39,7 +46,7 @@ class PreviewReviewResponse(BaseModel):
 
 
 class CreateTicketRequest(BaseModel):
-    session_id: str
+    session_id: SessionId
     draft: dict[str, str]
 
 

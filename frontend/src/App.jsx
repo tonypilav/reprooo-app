@@ -13,7 +13,7 @@ import {
   Textarea,
   Title,
 } from "@mantine/core";
-import { generateDraft, getMaskRules, getTemplate, maskPreview } from "./api";
+import { generateDraft, getMaskRules, getTemplate, maskPreview, isSessionUnavailable } from "./api";
 import MaskRuleToggles from "./MaskRuleToggles";
 import DraftEditor from "./DraftEditor";
 import { t } from "./texts";
@@ -26,13 +26,14 @@ function App() {
   const [rules, setRules] = useState([]);
   const [enabledRules, setEnabledRules] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
   const [maskedText, setMaskedText] = useState("");
   const [draftResult, setDraftResult] = useState(null);
   const [template, setTemplate] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const step = draftResult ? "draft" : sessionId ? "preview" : "input";
+  const step = draftResult ? "draft" : sessionId || sessionUnavailable ? "preview" : "input";
 
   useEffect(() => {
     getMaskRules()
@@ -62,7 +63,14 @@ function App() {
     }
   }
 
+  function handleSessionUnavailable() {
+    setSessionId(null);
+    setSessionUnavailable(true);
+    setError(t.errors.sessionUnavailable);
+  }
+
   async function handleGenerate() {
+    if (!sessionId || sessionUnavailable) return;
     setLoading(true);
     setError("");
     try {
@@ -76,8 +84,8 @@ function App() {
       setDraftResult(data);
       setTemplate(loadedTemplate);
     } catch (e) {
-      if (e.message === "SESSION_EXPIRED") {
-        setError(t.errors.sessionExpired);
+      if (isSessionUnavailable(e)) {
+        handleSessionUnavailable();
       } else {
         setError(t.errors.generate);
       }
@@ -88,6 +96,7 @@ function App() {
 
   function handleReset() {
     setSessionId(null);
+    setSessionUnavailable(false);
     setMaskedText("");
     setDraftResult(null);
     setTemplate(null);
@@ -166,12 +175,12 @@ function App() {
                     onClick={handleReset}
                     disabled={loading}
                   >
-                    {t.preview.back}
+                    {sessionUnavailable ? t.editor.reset : t.preview.back}
                   </Button>
                   <Button
                     onClick={handleGenerate}
                     loading={loading}
-                    disabled={!maskedText.trim()}
+                    disabled={!sessionId || sessionUnavailable || !maskedText.trim()}
                   >
                     {t.preview.action}
                   </Button>
@@ -185,6 +194,7 @@ function App() {
                 initialDraft={draftResult.draft}
                 sessionId={sessionId}
                 onReset={handleReset}
+                onSessionUnavailable={handleSessionUnavailable}
               />
             )}
           </Paper>
