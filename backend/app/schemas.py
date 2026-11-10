@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -27,6 +29,13 @@ class GenerateDraftRequest(BaseModel):
 class GenerateDraftResponse(BaseModel):
     draft: dict[str, str]
     missing_fields: list[str]
+
+
+class PreviewReviewResponse(BaseModel):
+    """Generation was not attempted; review masked_text and submit again."""
+
+    status: Literal["preview_review_required"] = "preview_review_required"
+    masked_text: str
 
 
 class CreateTicketRequest(BaseModel):

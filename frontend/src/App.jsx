@@ -67,6 +67,11 @@ function App() {
     setError("");
     try {
       const data = await generateDraft(sessionId, maskedText);
+      if (data.status === "preview_review_required") {
+        setMaskedText(data.masked_text);
+        setError(t.preview.reviewRequired);
+        return;
+      }
       const loadedTemplate = await getTemplate("bug");
       setDraftResult(data);
       setTemplate(loadedTemplate);

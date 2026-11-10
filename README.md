@@ -128,3 +128,28 @@ For detailed product requirements, architectural decisions, MVP boundaries, and 
 - [`AGENTS.md`](AGENTS.md) — repository instructions for AI coding agents.
 
 These documents should be consulted before implementing significant changes to the application.
+
+## Current masking security boundaries
+
+Credentials matching supported password/API-key assignments, quoted assignments,
+JWT/provider-token patterns, and Basic/Bearer Authorization formats are redacted
+before generation and mock ticket storage. Detected values repeated within one
+processing operation are also redacted. Arbitrary unlabeled values and unknown
+credential formats are outside this detection guarantee.
+
+Session masking state stores rule choices and placeholder/category metadata, not
+original values. No category is restored at this stage. Selective restoration
+remains planned for final review and will require a category-specific policy and
+explicit confirmation; personal data stays masked by default. Optional masking
+chips remain configurable, while credential rules cannot be disabled.
+
+Editing a preview triggers another backend check. If it changes the text, the
+updated preview must be reviewed and submitted again before generation. The
+active generator remains a local stub; no live OpenAI integration is enabled.
+Session validity and expiry lifecycle improvements remain a separate task.
+
+Synthetic-only backend verification (using existing environment dependencies):
+
+```sh
+PYTHONPATH=backend backend/.venv/bin/python -m unittest discover -s backend/tests -v
+```

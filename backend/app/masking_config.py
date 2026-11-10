@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,7 @@ class MaskRule:
     enabled_by_default: bool = True
     locked: bool = False
     learn_values: bool = False
+    sensitivity: Literal["secret", "personal", "technical"] = "technical"
 
 
 # Rules run in this order. The order matters: for example, links are masked
@@ -26,10 +28,12 @@ MASK_RULES = [
         patterns=(
             re.compile(
                 r"(?i)\b(?:password|passwd|pwd|secret|token|api[_-]?key|пароль)\b"
-                r"\s*[:=]\s*(?P<value>[^\s,;]+)"
+                r"[\"']?\s*[:=]\s*"
+                r"(?P<value>\"(?:\\[^\n]|[^\"\\\n])*\"|'(?:\\[^\n]|[^'\\\n])*'|[^\s,;]+)"
             ),
         ),
         locked=True,
+        sensitivity="secret",
     ),
     MaskRule(
         key="tokens",
@@ -37,6 +41,7 @@ MASK_RULES = [
         description="JWT, Bearer-токены, ключи API",
         placeholder="TOKEN",
         patterns=(
+            re.compile(r"(?i)\b(?:proxy-)?authorization[\"']?\s*:\s*[\"']?(?:Bearer|Basic)\s+(?P<value>[\w.~+/=-]+)"),
             re.compile(r"\beyJ[\w-]+\.[\w-]+\.[\w-]+"),
             re.compile(r"(?i)\bBearer\s+(?P<value>[\w.~+/=-]{8,})"),
             re.compile(
@@ -44,9 +49,11 @@ MASK_RULES = [
             ),
         ),
         locked=True,
+        sensitivity="secret",
     ),
     MaskRule(
         key="slack_names",
+        sensitivity="personal",
         label="Имена из Slack",
         description="Авторы сообщений и упоминания @имя",
         placeholder="PERSON",
@@ -72,6 +79,7 @@ MASK_RULES = [
     ),
     MaskRule(
         key="emails",
+        sensitivity="personal",
         label="Email",
         description="Адреса электронной почты",
         placeholder="EMAIL",
@@ -113,6 +121,7 @@ MASK_RULES = [
     ),
     MaskRule(
         key="phones",
+        sensitivity="personal",
         label="Телефоны",
         description="Номера с + или российским префиксом 8",
         placeholder="PHONE",

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.template_config import Template
+from app.masking import Masker
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,10 @@ class JiraAdapter:
             if value:
                 parts.append(f"{field.label}:\n{value}")
         description = "\n\n".join(parts)
+
+        masker = Masker()
+        safe = masker.sanitize_fields({"summary": summary, "description": description}, masker.context(set()))
+        summary, description = safe["summary"], safe["description"]
 
         key = f"MOCK-{len(self._tickets) + 1}"
         ticket = CreatedTicket(

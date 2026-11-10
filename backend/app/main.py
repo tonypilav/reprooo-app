@@ -1,11 +1,14 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from app.llm_client import LLMClient
 from app.masking import Masker
 from app.masking_config import MASK_RULES
 from app.jira_adapter import JiraAdapter
-from app.orchestrator import IncompleteDraftError, Orchestrator, SessionNotFoundError
+from app.orchestrator import IncompleteDraftError, Orchestrator, SessionNotFoundError, PreviewReviewRequired
 from app.schemas import (
+    PreviewReviewResponse,
     GenerateDraftRequest,
     GenerateDraftResponse,
     MaskPreviewRequest,
@@ -25,6 +28,21 @@ from app.template_config import get_template
 
 
 app = FastAPI()
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_validation_error(request, error):
+    return JSONResponse(status_code=422, content={"detail": "Invalid request"})
+
+
+@app.middleware("http")
+async def safe_processing_errors(request, call_next):
+    # Catch before ServerErrorMiddleware can re-raise/log sensitive exceptions.
+    try:
+        return await call_next(request)
+    except Exception:
+        return JSONResponse(status_code=500, content={"detail": "Processing failed"})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -79,12 +97,14 @@ def mask_preview(request: MaskPreviewRequest):
     return MaskPreviewResponse(session_id=session_id, masked_text=masked_text)
 
 
-@app.post("/api/generate-draft", response_model=GenerateDraftResponse)
+@app.post("/api/generate-draft", response_model=GenerateDraftResponse | PreviewReviewResponse)
 def generate_draft(request: GenerateDraftRequest):
     try:
         draft, missing_fields = orchestrator.generate_draft(
             request.session_id, request.masked_text
         )
+    except PreviewReviewRequired as review:
+        return PreviewReviewResponse(masked_text=review.masked_text)
     except SessionNotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
     return GenerateDraftResponse(draft=draft, missing_fields=missing_fields)
