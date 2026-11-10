@@ -1,12 +1,130 @@
-# reprooo-app
-Reprooo is a web application that transforms unstructured discussions, such as a Slack thread, into a ready-to-use bug report draft, formatted according to a standard QA template.
+# Reprooo
 
-Here’s how it works: the user inputs the discussion text, and the application masks sensitive information (names, email addresses, service names, and identifiers; keys and passwords are removed entirely). The user reviews the masked text before proceeding. An LLM then generates a structured draft based on the template schema, with completeness checks enforced via code. Finally, the original data—stored exclusively in the session’s memory—is reinserted into the draft. The user can refine the draft (with any missing information highlighted) and create a ticket in Jira Cloud with the click of a button (implemented via a mock for the hackathon; full integration is planned as a next step). Since the template is defined via a configuration file, new formats can be added without requiring additional development.
+**AI-powered requirements refinement — from raw context to development-ready Jira tickets.**
 
-Measurable impact: reduced time spent on ticket creation and fewer tickets returned for revision. By tracking metrics—such as which fields are edited manually or frequently left blank—the tool’s effectiveness can be quantified.
+Reprooo is a web application that transforms unstructured business requests, discussions, and technical context into clear, structured, and testable requirements.
 
-Future development:
-- Slack integration (enabling ticket creation directly from a thread).
-- Duplicate detection against an existing database.
-- Transitioning from an external LLM provider to a company-approved model.
-- A second mode, "Decision Log," which aggregates agreements, assigned owners, deadlines, and pending action items from various sources (Jira, notes, and threads), structured by roles and follow-up tasks.
+Instead of simply rewriting task descriptions, Reprooo identifies missing information, ambiguities, contradictions, and potential edge cases before they become blockers during development or QA.
+
+The goal is to improve task readiness, reduce clarification cycles, and enable QA engineers to participate earlier in the development lifecycle.
+
+## The Problem
+
+Software development teams frequently receive tasks with incomplete or ambiguous requirements.
+
+Critical details — such as expected behavior, access permissions, error handling, dependencies, and acceptance criteria — are often discovered only after development has started or when a task reaches testing.
+
+This results in additional discussions, rework, delayed testing, and inconsistent expectations between business stakeholders, developers, and QA engineers.
+
+Reprooo addresses this problem by introducing an AI-assisted requirements refinement process before or during the early stages of development.
+
+## How It Works
+
+The target workflow consists of six stages:
+
+1. **Provide context.** The user enters an initial business request, task description, or discussion copied from Slack. Supporting technical documentation may be attached where supported.
+2. **Mask sensitive information.** The application detects and masks configured categories of sensitive data. The user reviews the masked content before AI processing. Credentials and secrets must never be restored into generated tickets.
+3. **Generate an initial draft.** An LLM analyzes the context and produces a structured Jira task, highlighting missing requirements, ambiguities, contradictions, and potential edge cases.
+4. **Refine requirements iteratively.** The user answers clarification questions, edits the draft, and requests another analysis. Each iteration updates only relevant sections while preserving previously approved requirements.
+5. **Finalize the task.** The user reviews the resulting requirements, acceptance criteria, and unresolved questions before deciding whether the task is ready.
+6. **Create a Jira ticket.** The finalized task is submitted through a Jira adapter. The hackathon MVP uses a mock implementation; real Jira Cloud integration is planned for future development.
+
+The user controls the number of refinement iterations and makes the final decision about task readiness.
+
+## Key Capabilities
+
+- **Context-aware analysis:** identifies potential gaps based on the type of task and the supplied information.
+- **Structured requirements:** generates business context, functional requirements, acceptance criteria, constraints, and relevant edge cases.
+- **Clarification questions:** distinguishes blocking questions from recommended and optional clarifications.
+- **Incremental refinement:** updates existing drafts without unnecessarily rewriting previously approved requirements.
+- **Sensitive-data masking:** configurable masking rules with a user-facing preview.
+- **Template-driven generation:** task structure is defined through configuration rather than hardcoded into the UI.
+- **Human-in-the-loop workflow:** the AI suggests improvements but does not invent or independently approve business decisions.
+- **Jira-ready output:** produces a structured task suitable for review and submission.
+
+## Technology Stack
+
+| Layer                   | Technology                                   |
+| ----------------------- | -------------------------------------------- |
+| Frontend                | React, JavaScript, Mantine, Vite             |
+| Backend                 | Python, FastAPI, Pydantic                    |
+| LLM integration         | OpenAI API                                   |
+| Orchestration           | Modular Python orchestration layer           |
+| Sensitive-data handling | Configurable masking rules                   |
+| Session management      | In-memory session store with TTL             |
+| Task templates          | Configuration-driven schemas                 |
+| Jira integration        | Adapter pattern, mock implementation for MVP |
+
+## Architecture
+
+The application uses a modular architecture separating the user interface, orchestration, sensitive-data processing, LLM integration, requirements validation, session management, and Jira integration.
+
+The intended processing flow is:
+
+`User Context → Masking → LLM Draft Generation → Completeness Analysis → Iterative Refinement → Final Review → Jira Adapter`
+
+Draft generation and completeness analysis are logically separate responsibilities.
+
+Refinement should be incremental: previously approved requirements must remain unchanged unless the user explicitly authorizes modifications.
+
+Sensitive data must be handled before external LLM requests. Supporting documentation is subject to the same security considerations as user-provided context.
+
+## Hackathon MVP
+
+The MVP focuses on demonstrating the complete requirements refinement workflow:
+
+- Enter unstructured context.
+- Configure and review sensitive-data masking.
+- Generate an initial structured task using an LLM.
+- Identify missing requirements and generate clarification questions.
+- Refine the draft through multiple iterations.
+- Preserve previously approved requirements.
+- Review and finalize the resulting task.
+- Simulate Jira ticket creation.
+- Reset the workflow after successful submission.
+
+### Current Implementation Status
+
+The repository already contains the frontend workflow, configurable masking, session handling, a template-driven draft editor, an orchestration layer, and a mock Jira adapter.
+
+However, the transition from the original bug-report prototype to the requirements refinement workflow is still in progress.
+
+In particular, real LLM generation is not yet connected to the active workflow, iterative clarification is not yet implemented, and the existing bug-report template must be replaced.
+
+The current application should therefore be considered a **working prototype under active development**, not a completed implementation of all capabilities described above.
+
+## Expected Impact
+
+Reprooo aims to improve the quality of requirements before development and testing.
+
+Potential effectiveness metrics include:
+
+- Reduction in clarification questions raised during QA.
+- Reduction in tasks returned for requirements clarification.
+- Time required to prepare development-ready tasks.
+- Number and severity of missing requirements identified before development.
+- Number of refinement iterations per task.
+- Frequency of changes to acceptance criteria after development begins.
+
+These are proposed evaluation metrics, not measured outcomes of the current prototype.
+
+## Future Development
+
+- **Knowledge base:** reusable specifications, documentation, and team-specific requirements.
+- **Team and service context:** automatically retrieve relevant documentation based on the selected team or service.
+- **Repository integration:** use relevant technical specifications and code context when analyzing requirements.
+- **Specification generation:** preserve technical specifications alongside pull requests.
+- **Real Jira Cloud integration:** create and update tasks directly.
+- **Slack integration:** import discussions without manual copying.
+- **Organizational learning:** reuse previously identified requirement gaps, clarification patterns, and team conventions.
+- **Company-approved LLM providers:** support deployment using approved internal or external models.
+- **Analytics:** measure requirements quality and refinement effectiveness.
+
+## Project Documentation
+
+For detailed product requirements, architectural decisions, MVP boundaries, and acceptance criteria, see:
+
+- [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) — product vision, target workflow, and requirements.
+- [`AGENTS.md`](AGENTS.md) — repository instructions for AI coding agents.
+
+These documents should be consulted before implementing significant changes to the application.
