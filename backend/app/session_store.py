@@ -1,3 +1,4 @@
+from copy import deepcopy
 import re
 import secrets
 import time
@@ -20,8 +21,14 @@ class SessionUnavailableError(Exception):
     pass
 
 
-def copy_context(context: MaskingContext) -> MaskingContext:
-    return MaskingContext(context.enabled_keys, context.issued.copy())
+@dataclass
+class SessionContext(MaskingContext):
+    refinement: dict = field(default_factory=dict)
+
+
+def copy_context(context: MaskingContext) -> SessionContext:
+    return SessionContext(context.enabled_keys, context.issued.copy(),
+                          deepcopy(getattr(context, 'refinement', {})))
 
 
 @dataclass
@@ -115,7 +122,7 @@ class SessionStore:
     @contextmanager
     def operation(
         self, session_id: str, *, consume: bool = False,
-        reservation: SessionReservation | None = None,
+        reservation: SessionReservation | None = None, refresh: bool = True,
     ) -> Iterator[MaskingContext]:
         """Claim admission once, then serialize work without rechecking TTL.
 
@@ -145,7 +152,7 @@ class SessionStore:
                     raise SessionUnavailableError("Session unavailable")
                 if consume:
                     del self._sessions[session_id]
-                else:
+                elif refresh:
                     entry.context = copy_context(working)
                     entry.expires_at = self._clock() + self._ttl_seconds
         finally:

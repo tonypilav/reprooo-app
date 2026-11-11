@@ -75,8 +75,8 @@ No database migration, automatic conversion, or historical template storage is n
 
 The current offline stub copies the first nonempty sanitized input line to `summary`
 and all sanitized input to `requirements`. It leaves Business Context, Acceptance
-Criteria, and Open Questions empty. It neither performs AI refinement nor generates
-clarification questions. Semantic analysis and question lifecycle remain future work.
+Criteria, and Open Questions empty. Task 5 additionally asks literal questions for empty required fields and proposes
+copying explicit answers into empty sections. Semantic reasoning requires OpenAI mode.
 
 ## 5. Completeness analysis and questions
 
@@ -149,7 +149,7 @@ The earlier audit reported:
 
 These findings describe the historical prototype, not the current implementation.
 
-### Current implementation after Tasks 1–3
+### Current implementation after Tasks 1–5
 
 - Task 1 added irreversible supported-secret redaction, edited-preview rechecking,
   safe processing/output boundaries, and synthetic regression tests. No original
@@ -166,9 +166,13 @@ These findings describe the historical prototype, not the current implementation
   Structured Outputs, a 60-second SDK timeout, zero automatic retries, and no
   fallback. Configuration is validated at application initialization. Safe 502/504
   errors preserve retry behavior and existing session semantics.
-- Semantic completeness analysis, interactive clarifications, canonical draft
-  history, approvals, and real Jira integration are not implemented. Task 4 keeps
-  generated `open_questions` empty and leaves unsupported business content empty.
+- Task 5 adds session-owned sanitized drafts/revisions, 0–5 gap questions,
+  dispositions, targeted proposals, independent decisions and rejection protection.
+  Manual edits synchronize only on explicit operations. Recovery and replay use the
+  existing transactional session ownership. Jira open-question additions require
+  explicit confirmation. Generation still starts with empty `open_questions`.
+- Final section approvals (Task 6), persistent history and real Jira integration
+  remain unimplemented. The offline stub remains intentionally non-semantic.
 
 The rest of this document continues to define the target MVP. Current structural
 checks and free-text Open Questions do not implement the future analysis/question

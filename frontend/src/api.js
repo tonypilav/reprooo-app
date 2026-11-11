@@ -21,6 +21,7 @@ async function sessionResponse(response) {
         || (response.status === 504 && code === "LLM_TIMEOUT")) {
       error.code = code;
     }
+    if (response.status === 409 && code === "REVISION_CONFLICT") error.code = code;
     throw error;
   }
   return response.json();
@@ -86,12 +87,25 @@ export async function getTemplate(reference) {
   return loaded;
 }
 
-export async function createTicket(sessionId, draft, template) {
+export async function createTicket(sessionId, draft, template, synchronization = {}) {
   requireSession(sessionId);
   const response = await fetch(`${API_URL}/api/create-ticket`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, template: templateReference(template), draft }),
+    body: JSON.stringify({ session_id: sessionId, template: templateReference(template), draft, ...synchronization }),
   });
   return sessionResponse(response);
+}
+
+export async function clarificationOperation(kind, payload) {
+  requireSession(payload.session_id);
+  return sessionResponse(await fetch(`${API_URL}/api/clarifications/${kind}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }));
+}
+
+export async function getRefinement(sessionId) {
+  requireSession(sessionId);
+  return sessionResponse(await fetch(`${API_URL}/api/sessions/${encodeURIComponent(sessionId)}/refinement`));
 }

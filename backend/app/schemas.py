@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, StringConstraints
 
 from app.session_store import SESSION_ID_PATTERN
 
@@ -41,6 +41,7 @@ class TemplateReference(BaseModel):
 
 
 class GenerateDraftResponse(BaseModel):
+    revision: int = 1
     template: TemplateReference
     draft: dict[str, str]
     missing_fields: list[str]
@@ -54,6 +55,10 @@ class PreviewReviewResponse(BaseModel):
 
 
 class CreateTicketRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: Annotated[StrictInt, Field(ge=1)] | None = None
+    request_id: Annotated[str, StringConstraints(strict=True, min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")] | None = None
     session_id: SessionId
     template: TemplateReference
     draft: dict[str, str]

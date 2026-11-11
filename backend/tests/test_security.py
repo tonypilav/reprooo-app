@@ -120,6 +120,14 @@ class MaskingTests(unittest.TestCase):
         masked, _ = self.masker.mask("Demo Person  [12:30]\nDemo Person replied", {"slack_names"})
         self.assertNotIn("Demo Person", masked)
 
+    def test_sanitized_placeholder_followed_by_punctuation_is_stable(self):
+        masker = Masker()
+        context = masker.context(set())
+        safe = masker.sanitize_fields({'answer': 'password=synthetic-cross-value',
+            'question': 'What about synthetic-cross-value?'}, context)
+        self.assertNotIn('synthetic-cross-value', str(safe))
+        self.assertEqual(masker.sanitize_fields(safe, context), safe)
+
     def test_literal_old_placeholders_inert(self):
         masked, context = self.masker.mask("literal [SECRET_1] password=demo-pass", set())
         self.assertIn("[SECRET_1]", masked)

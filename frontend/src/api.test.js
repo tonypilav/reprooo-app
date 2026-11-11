@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { afterEach, mock, test } from "node:test";
 import { transformWithOxc } from "vite";
 import * as api from "./api.js";
+import * as refinementState from "./refinementState.js";
 import { t } from "./texts.js";
 
 const sid = "A".repeat(22);
@@ -74,7 +75,7 @@ async function mount(filename) {
   const pending = [];
   const createElement = (type, props, ...children) => ({ type, props: props || {}, children });
   const deps = {
-    ...api, t, createElement,
+    ...api, ...refinementState, t, createElement,
     getMaskRules(...args) {
       const result = api.getMaskRules(...args);
       pending.push(result);
@@ -87,11 +88,16 @@ async function mount(filename) {
         states[index] = typeof value === "function" ? value(states[index]) : value;
       }];
     },
+    useRef(initial) {
+      const index = cursor++;
+      if (!(index in states)) states[index] = { current: initial };
+      return states[index];
+    },
     useEffect(effect) { if (!mounted) effects.push(effect); },
     Stepper: Object.assign(() => {}, { Step: "Step" }),
     MaskRuleToggles: "MaskRuleToggles", DraftEditor: "DraftEditor", logo: "synthetic-logo",
   };
-  for (const name of ["Alert", "Box", "Button", "Container", "Group", "Image", "Paper", "Stack", "Text", "Textarea", "Title", "Badge"]) deps[name] = name;
+  for (const name of ["Select", "Alert", "Box", "Button", "Container", "Group", "Image", "Paper", "Stack", "Text", "Textarea", "Title", "Badge"]) deps[name] = name;
   const source = (await readFile(new URL(filename, import.meta.url), "utf8"))
     .replace(/^import[\s\S]*?from\s+["'][^"']+["'];/gm, "");
   const { code } = await transformWithOxc(source, filename, { jsx: { runtime: "classic", pragma: "createElement" } });
@@ -260,7 +266,12 @@ test("five fields are ordered and independently editable; only three gate submis
   }
   await find(editor.render(props), "Button", t.editor.create).props.onClick();
   const call = fetch.mock.calls.find((call) => call.arguments[0].endsWith("create-ticket"));
-  assert.deepEqual(JSON.parse(call.arguments[1].body), { session_id: sid, template: reference, draft: edited });
+  const body = JSON.parse(call.arguments[1].body);
+  assert.equal(body.expected_revision, 1);
+  assert.equal(typeof body.request_id, "string");
+  const legacy = { ...body };
+  delete legacy.expected_revision; delete legacy.request_id;
+  assert.deepEqual(legacy, { session_id: sid, template: reference, draft: edited });
 });
 
 for (const failure of ["network", "version"]) {
@@ -332,3 +343,249 @@ for (const [status, code, message] of [
     assert.equal(find(tree, "Textarea", t.input.title).props.value, "Original synthetic context");
   });
 }
+
+const clarificationCheckpoint = (draft = completeDraft(), revision = 2) => ({
+  draft, revision, questions: [], question_history: [], proposals: [], protected_sections: [],
+  open_question_items: [], recent_request_ids: [], batch_id: null,
+});
+const editorProps = () => ({ template: requirementsTemplate, initialDraft: completeDraft(), initialRevision: 1,
+  sessionId: sid, onReset() {}, onSessionUnavailable() {} });
+
+test('analysis preserves a newer in-flight manual edit and uses it next iteration', async () => {
+  let resolve;
+  const fetch = mock.method(globalThis, 'fetch', async () => new Promise((done) => { resolve = done; }));
+  const editor = await mount('./DraftEditor.jsx');
+  const props = editorProps();
+  editor.render(props);
+  const work = find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  change(find(editor.render(props), 'Textarea', summaryLabel), 'Newer local summary');
+  resolve(response(200, clarificationCheckpoint({ ...completeDraft(), requirements: 'Canonical requirement' })));
+  await work;
+  const tree = editor.render(props);
+  assert.equal(find(tree, 'Textarea', summaryLabel).props.value, 'Newer local summary');
+  assert.equal(find(tree, 'Textarea', 'Требования').props.value, 'Canonical requirement');
+  fetch.mock.restore();
+  const next = mock.method(globalThis, 'fetch', async () => response(200, clarificationCheckpoint()));
+  await find(editor.render(props), 'Button', t.clarification.again).props.onClick();
+  const body = JSON.parse(next.mock.calls[0].arguments[1].body);
+  assert.equal(body.expected_revision, 2);
+  assert.equal(body.draft.summary, 'Newer local summary');
+});
+
+test('revision conflict keeps edits and requires explicit checkpoint adoption', async () => {
+  mock.method(globalThis, 'fetch', async (url) => url.endsWith('/refinement')
+    ? response(200, clarificationCheckpoint({ ...completeDraft(), summary: 'Backend summary' }, 4))
+    : response(409, { detail: { code: 'REVISION_CONFLICT' } }));
+  const editor = await mount('./DraftEditor.jsx');
+  const props = editorProps();
+  editor.render(props);
+  change(find(editor.render(props), 'Textarea', summaryLabel), 'Local summary');
+  await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', summaryLabel).props.value, 'Local summary');
+  assert.equal(find(editor.render(props), 'Button', t.clarification.analyze).props.disabled, true);
+  await find(editor.render(props), 'Button', t.clarification.recover).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', summaryLabel).props.value, 'Local summary');
+  find(editor.render(props), 'Button', t.clarification.adopt).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', summaryLabel).props.value, 'Backend summary');
+});
+
+test('retry uses the same request ID for an unchanged operation', async () => {
+  const fetch = mock.method(globalThis, 'fetch', async () => response(502, { detail: { code: 'LLM_GENERATION_FAILED' } }));
+  const editor = await mount('./DraftEditor.jsx');
+  const props = editorProps();
+  editor.render(props);
+  await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  const bodies = fetch.mock.calls.map((call) => JSON.parse(call.arguments[1].body));
+  assert.equal(bodies[0].request_id, bodies[1].request_id);
+  change(find(editor.render(props), 'Textarea', summaryLabel), 'Changed content');
+  await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  assert.notEqual(JSON.parse(fetch.mock.calls[2].arguments[1].body).request_id, bodies[0].request_id);
+});
+
+test('sanitized review requires an explicit action and preserves newer edits', async () => {
+  const fetch = mock.method(globalThis, 'fetch', async () => response(200, {
+    status: 'preview_review_required', draft: { ...completeDraft(), requirements: '[REDACTED]' }, answers: [],
+    review_token: 'signed-synthetic-review',
+  }));
+  const editor = await mount('./DraftEditor.jsx');
+  const props = editorProps();
+  editor.render(props);
+  await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', 'Требования').props.value, '');
+  change(find(editor.render(props), 'Textarea', summaryLabel), 'New manual text');
+  find(editor.render(props), 'Button', t.clarification.applyReview).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', 'Требования').props.value, '[REDACTED]');
+  assert.equal(find(editor.render(props), 'Textarea', summaryLabel).props.value, 'New manual text');
+  assert.equal(fetch.mock.callCount(), 1);
+  await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  assert.equal(JSON.parse(fetch.mock.calls[1].arguments[1].body).review_token, 'signed-synthetic-review');
+});
+
+for (const include of [true, false]) {
+  test(`open-question preview requires explicit ${include ? 'incorporation' : 'decline'} before Jira`, async () => {
+    const state = clarificationCheckpoint();
+    state.open_question_items = ['Who approves?', 'Решение делегировано реализации: Which algorithm?'];
+    const fetch = mock.method(globalThis, 'fetch', async (url) => url.endsWith('/analyze')
+      ? response(200, state) : response(200, { key: 'MOCK-5', summary: 'Synthetic', description: 'Synthetic' }));
+    const editor = await mount('./DraftEditor.jsx');
+    const props = editorProps();
+    editor.render(props);
+    await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+    change(find(editor.render(props), 'Textarea', 'Открытые вопросы'), 'Manual question');
+    await find(editor.render(props), 'Button', t.editor.create).props.onClick();
+    assert.equal(fetch.mock.callCount(), 1);
+    assert.equal(find(editor.render(props), 'Textarea', 'Открытые вопросы').props.value, 'Manual question');
+    await find(editor.render(props), 'Button', include ? t.clarification.include : t.clarification.decline).props.onClick();
+    const body = JSON.parse(fetch.mock.calls[1].arguments[1].body);
+    assert.equal(body.expected_revision, 2);
+    assert.equal(body.draft.open_questions.startsWith('Manual question'), true);
+    assert.equal(body.draft.open_questions.includes('Who approves?'), include);
+    assert.equal(body.draft.open_questions.includes('Решение делегировано'), include);
+  });
+}
+
+test('question partial answers, proposals and protected sections use independent mutations', async () => {
+  const state = clarificationCheckpoint();
+  const q = { id: 'q1', text: 'What goal?', section_ids: ['business_context'], priority: 'recommended',
+    rationale: 'Incomplete context', evidence: '', status: 'unanswered', answer: '' };
+  state.questions = [q]; state.question_history = [q];
+  const proposal = { id: 'p1', section_id: 'business_context', replacement: 'Literal goal', base_text: completeDraft().business_context,
+    reason: 'Explicit answer', question_ids: ['q1'], conflict: true };
+  const fetch = mock.method(globalThis, 'fetch', async (url) => {
+    if (url.endsWith('/refine')) return response(200, { ...state, revision: 3, proposals: [proposal], batch_id: 'batch1',
+      questions: [{ ...q, status: 'answered', answer: 'Literal goal' }] });
+    if (url.endsWith('/decisions')) return response(200, { ...state, revision: 4, protected_sections: ['business_context'] });
+    return response(200, state);
+  });
+  const editor = await mount('./DraftEditor.jsx'); const props = editorProps(); editor.render(props);
+  await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  change(find(editor.render(props), 'Textarea', t.clarification.answer), 'Literal goal');
+  await find(editor.render(props), 'Button', t.clarification.refine).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', 'Бизнес-контекст').props.value, completeDraft().business_context);
+  assert.equal(nodes(editor.render(props)).some((node) => node.children.includes(t.clarification.conflict)), true);
+  await find(editor.render(props), 'Button', t.clarification.reject).props.onClick();
+  let body = JSON.parse(fetch.mock.calls[2].arguments[1].body);
+  assert.deepEqual(body.decisions, [{ proposal_id: 'p1', action: 'reject' }]);
+  assert.equal(body.batch_id, 'batch1');
+  await find(editor.render(props), 'Button', t.clarification.allow).props.onClick();
+  body = JSON.parse(fetch.mock.calls[3].arguments[1].body);
+  assert.deepEqual(body.allow_sections, ['business_context']);
+});
+
+test('open-question additions avoid normalized duplicates and preserve manual text', () => {
+  const original = 'Who approves?\nManual unrelated question';
+  assert.equal(refinementState.openQuestionsPreview(original, ['WHO APPROVES?', 'New question?']), original + '\n- New question?');
+});
+
+function pendingInputCheckpoint() {
+  const state = clarificationCheckpoint();
+  state.questions = ['q1', 'q2', 'q3'].map((id) => ({ id, text: `Synthetic ${id}?`,
+    section_ids: ['requirements'], priority: 'recommended', rationale: 'Synthetic gap', evidence: '',
+    status: 'unanswered', answer: '' }));
+  state.question_history = state.questions;
+  state.proposals = [{ id: 'p1', section_id: 'business_context', base_text: state.draft.business_context,
+    replacement: 'Explicit goal', reason: 'Synthetic', question_ids: ['q1'], conflict: false }];
+  state.batch_id = 'batch1';
+  state.protected_sections = ['acceptance_criteria'];
+  return state;
+}
+
+for (const action of ['analyze', 'accept', 'reject', 'allow']) {
+  test(`pending answers and dispositions survive successful ${action}`, async () => {
+    const state = pendingInputCheckpoint();
+    const fetch = mock.method(globalThis, 'fetch', async () => response(200, state));
+    const editor = await mount('./DraftEditor.jsx'); const props = editorProps(); editor.render(props);
+    await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+    const answerFields = () => nodes(editor.render(props)).filter((n) => n.type === 'Textarea' && n.props.label === t.clarification.answer);
+    const dispositions = () => nodes(editor.render(props)).filter((n) => n.type === 'Select');
+    change(answerFields()[0], 'Pending literal answer');
+    dispositions()[1].props.onChange('left_to_implementation');
+    await find(editor.render(props), 'Button', action === 'analyze' ? t.clarification.again : t.clarification[action]).props.onClick();
+    assert.equal(answerFields()[0].props.value, 'Pending literal answer');
+    assert.equal(dispositions()[1].props.value, 'left_to_implementation');
+    assert.equal(JSON.parse(fetch.mock.calls[1].arguments[1].body).answers, undefined);
+    await find(editor.render(props), 'Button', t.clarification.refine).props.onClick();
+    assert.deepEqual(JSON.parse(fetch.mock.calls[2].arguments[1].body).answers, [
+      {question_id: 'q1', status: 'answered', answer: 'Pending literal answer'},
+      {question_id: 'q2', status: 'left_to_implementation', answer: ''},
+    ]);
+  });
+}
+
+for (const outcome of ['failure', 'review']) {
+  test(`pending refinement input survives ${outcome}`, async () => {
+    const state = pendingInputCheckpoint();
+    const fetch = mock.method(globalThis, 'fetch', async (url) => url.endsWith('/analyze')
+      ? response(200, state) : outcome === 'failure'
+        ? response(502, {detail: {code: 'LLM_GENERATION_FAILED'}})
+        : response(200, {status: 'preview_review_required', draft: state.draft, answers: []}));
+    const editor = await mount('./DraftEditor.jsx'); const props = editorProps(); editor.render(props);
+    await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+    const fields = () => nodes(editor.render(props)).filter((n) => n.type === 'Textarea' && n.props.label === t.clarification.answer);
+    change(fields()[0], 'Pending answer');
+    nodes(editor.render(props)).filter((n) => n.type === 'Select')[1].props.onChange('not_applicable');
+    await find(editor.render(props), 'Button', t.clarification.refine).props.onClick();
+    assert.equal(fields()[0].props.value, 'Pending answer');
+    assert.equal(nodes(editor.render(props)).filter((n) => n.type === 'Select')[1].props.value, 'not_applicable');
+    await find(editor.render(props), 'Button', t.clarification.refine).props.onClick();
+    assert.deepEqual(JSON.parse(fetch.mock.calls[2].arguments[1].body).answers,
+      JSON.parse(fetch.mock.calls[1].arguments[1].body).answers);
+  });
+}
+
+test('refinement clears only acknowledged entries and preserves newer in-flight edits by identity', async () => {
+  const state = pendingInputCheckpoint();
+  let finish;
+  const fetch = mock.method(globalThis, 'fetch', async (url) => url.endsWith('/analyze')
+    ? response(200, state) : new Promise((resolve) => { finish = resolve; }));
+  const editor = await mount('./DraftEditor.jsx'); const props = editorProps(); editor.render(props);
+  await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  const fields = () => nodes(editor.render(props)).filter((n) => n.type === 'Textarea' && n.props.label === t.clarification.answer);
+  const dispositions = () => nodes(editor.render(props)).filter((n) => n.type === 'Select');
+  change(fields()[0], 'Older answer');
+  dispositions()[1].props.onChange('not_applicable');
+  const work = find(editor.render(props), 'Button', t.clarification.refine).props.onClick();
+  const sent = JSON.parse(fetch.mock.calls[1].arguments[1].body).answers;
+  change(fields()[0], 'Newer answer');
+  dispositions()[2].props.onChange('needs_stakeholder_decision');
+  const saved = state.questions.map((q) => ({...q, ...sent.find((a) => a.question_id === q.id)}));
+  // Reorder questions to ensure pending input follows IDs, never array positions.
+  finish(response(200, {...state, revision: 3, questions: [...saved].reverse(), question_history: saved}));
+  await work;
+  assert.deepEqual(fields().map((n) => n.props.value), ['', '', 'Newer answer']);
+  assert.equal(dispositions()[0].props.value, 'needs_stakeholder_decision');
+  const next = find(editor.render(props), 'Button', t.clarification.refine).props.onClick();
+  assert.deepEqual(JSON.parse(fetch.mock.calls[2].arguments[1].body).answers, [
+    {question_id: 'q1', status: 'answered', answer: 'Newer answer'},
+    {question_id: 'q3', status: 'needs_stakeholder_decision', answer: ''},
+  ]);
+  const nextSent = JSON.parse(fetch.mock.calls[2].arguments[1].body).answers;
+  const acknowledged = saved.map((q) => ({...q, ...nextSent.find((a) => a.question_id === q.id)}));
+  finish(response(200, {...state, revision: 4, questions: acknowledged, question_history: acknowledged}));
+  await next;
+  const empty = find(editor.render(props), 'Button', t.clarification.refine).props.onClick();
+  assert.deepEqual(JSON.parse(fetch.mock.calls[3].arguments[1].body).answers, []);
+  finish(response(200, {...state, revision: 5, questions: acknowledged, question_history: acknowledged}));
+  await empty;
+});
+
+test('pending input for superseded questions is not submitted against their replacement', async () => {
+  const state = pendingInputCheckpoint();
+  let calls = 0;
+  const fetch = mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    if (calls === 1) return response(200, state);
+    const old = {...state.questions[0], superseded_by: 'replacement'};
+    const replacement = {...state.questions[0], id: 'replacement'};
+    return response(200, {...state, questions: [replacement, ...state.questions.slice(1)],
+      question_history: [old, replacement, ...state.questions.slice(1)]});
+  });
+  const editor = await mount('./DraftEditor.jsx'); const props = editorProps(); editor.render(props);
+  await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
+  change(find(editor.render(props), 'Textarea', t.clarification.answer), 'Old identity answer');
+  await find(editor.render(props), 'Button', t.clarification.again).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', t.clarification.answer).props.value, '');
+  await find(editor.render(props), 'Button', t.clarification.refine).props.onClick();
+  assert.deepEqual(JSON.parse(fetch.mock.calls[2].arguments[1].body).answers, []);
+});

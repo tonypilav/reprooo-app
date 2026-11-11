@@ -26,6 +26,7 @@ class GeneratedDraft:
     template: TemplateReference
     draft: dict[str, str]
     missing_fields: list[str]
+    revision: int = 1
 
 
 class Orchestrator:
@@ -65,6 +66,9 @@ class Orchestrator:
             if model_text.text != masked_text:
                 review_text = model_text.text
             else:
+                if context.refinement and context.refinement['revision'] > 1:
+                    from app.refinement import RevisionConflict
+                    raise RevisionConflict()
                 draft_with_masks = self._llm_client.generate_draft(model_text, template)
                 try:
                     normalized = self._validator.normalize(draft_with_masks, template)
@@ -72,17 +76,21 @@ class Orchestrator:
                     raise ValueError("Invalid generated draft") from None
                 draft = self._masker.sanitize_fields(normalized, context)
                 missing_fields = self._validator.find_missing(draft, template)
+                from app.refinement import initialize
+                initialize(context, draft)
         # Review-required is successful activity: commit metadata/TTL before
         # translating it to the existing user-facing response.
         if review_text is not None:
             raise PreviewReviewRequired(review_text)
         return GeneratedDraft(
-            TemplateReference(mode=template.mode, version=template.version), draft, missing_fields
+            TemplateReference(mode=template.mode, version=template.version), draft, missing_fields,
+            context.refinement["revision"]
         )
 
     def create_ticket(
         self, session_id: str, draft: dict[str, str], template_ref: TemplateReference,
         *, reservation: SessionReservation | None = None,
+        expected_revision: int | None = None, request_id: str | None = None,
     ) -> CreatedTicket:
         with self._session_store.operation(
             session_id, consume=True, reservation=reservation
@@ -91,6 +99,18 @@ class Orchestrator:
             if (template_ref.mode != template.mode or template_ref.version != template.version):
                 raise InvalidDraftError()
             draft = self._validator.normalize(draft, template)
+            if (expected_revision is None) != (request_id is None):
+                raise InvalidDraftError()
+            if expected_revision is not None:
+                from app.refinement import RevisionConflict, ReviewNeeded
+                from app.refinement_schemas import RefinementReview
+                if not request_id or not context.refinement or expected_revision != context.refinement['revision']:
+                    raise RevisionConflict()
+                safe = self._masker.sanitize_fields(draft, context)
+                if safe != draft:
+                    raise ReviewNeeded(RefinementReview(draft=safe))
+                context.refinement['draft'] = safe
+                context.refinement['revision'] += 1
             draft = self._masker.sanitize_fields(draft, context)
             missing_fields = self._validator.find_missing(draft, template)
             if missing_fields:

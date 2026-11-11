@@ -222,6 +222,7 @@ function App() {
               <DraftEditor
                 template={template}
                 initialDraft={draftResult.draft}
+                initialRevision={draftResult.revision || 1}
                 sessionId={sessionId}
                 onReset={handleReset}
                 onSessionUnavailable={handleSessionUnavailable}

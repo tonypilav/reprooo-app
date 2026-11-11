@@ -3,6 +3,9 @@ import logging
 from contextlib import asynccontextmanager, suppress
 from functools import partial
 
+from app.refinement import RefinementService, RevisionConflict, ReviewNeeded
+from app.refinement_schemas import AnalyzeRequest, RefineRequest, DecisionsRequest, Checkpoint, RefinementReview
+
 from anyio import to_thread
 
 from fastapi import FastAPI, HTTPException
@@ -69,6 +72,16 @@ async def lifespan(application):
 
 app = FastAPI(lifespan=lifespan)
 
+@app.exception_handler(RevisionConflict)
+async def revision_conflict(request, error):
+    return JSONResponse(status_code=409, content={'detail': {
+        'code': 'REVISION_CONFLICT', 'message': 'Reload the session checkpoint to continue.'}})
+
+@app.exception_handler(ReviewNeeded)
+async def refinement_review(request, error):
+    return JSONResponse(content=error.review.model_dump())
+
+
 
 @app.exception_handler(SessionUnavailableError)
 async def session_unavailable(request, error):
@@ -80,6 +93,8 @@ async def session_unavailable(request, error):
 
 @app.exception_handler(LLMError)
 async def llm_error(request, error):
+    # Fixed categories only: never log exception text, payloads, or tracebacks.
+    logger.warning("LLM failure category=%s", error.category)
     timeout = isinstance(error, LLMTimeoutError)
     return JSONResponse(status_code=504 if timeout else 502, content={"detail": {
         "code": "LLM_TIMEOUT" if timeout else "LLM_GENERATION_FAILED",
@@ -195,14 +210,14 @@ async def generate_draft(request: GenerateDraftRequest):
     except PreviewReviewRequired as review:
         return PreviewReviewResponse(masked_text=review.masked_text)
     return GenerateDraftResponse(
-        template=result.template, draft=result.draft, missing_fields=result.missing_fields
+        template=result.template, draft=result.draft, missing_fields=result.missing_fields, revision=result.revision
     )
 
-@app.post("/api/create-ticket", response_model=CreateTicketResponse)
+@app.post("/api/create-ticket", response_model=CreateTicketResponse | RefinementReview)
 async def create_ticket(request: CreateTicketRequest):
     try:
         ticket = await run_session_operation(
-            orchestrator.create_ticket, request.session_id, request.draft, request.template
+            partial(orchestrator.create_ticket, expected_revision=request.expected_revision, request_id=request.request_id), request.session_id, request.draft, request.template
         )
     except IncompleteDraftError as error:
         raise HTTPException(
@@ -224,3 +239,26 @@ async def create_ticket(request: CreateTicketRequest):
 async def delete_session(session_id: SessionId):
     await run_session_operation(orchestrator.delete_session, session_id)
     return {"status": "deleted"}
+
+
+@app.post('/api/clarifications/analyze', response_model=Checkpoint | RefinementReview)
+async def analyze_clarifications(request: AnalyzeRequest):
+    service = RefinementService(orchestrator)
+    return await run_session_operation(service.mutate, request.session_id, 'analyze', request)
+
+
+@app.post('/api/clarifications/refine', response_model=Checkpoint | RefinementReview)
+async def refine_clarifications(request: RefineRequest):
+    service = RefinementService(orchestrator)
+    return await run_session_operation(service.mutate, request.session_id, 'refine', request)
+
+
+@app.post('/api/clarifications/decisions', response_model=Checkpoint | RefinementReview)
+async def decide_clarifications(request: DecisionsRequest):
+    service = RefinementService(orchestrator)
+    return await run_session_operation(service.mutate, request.session_id, 'decisions', request)
+
+
+@app.get('/api/sessions/{session_id}/refinement', response_model=Checkpoint)
+async def read_refinement(session_id: SessionId):
+    return await run_session_operation(RefinementService(orchestrator).read, session_id)

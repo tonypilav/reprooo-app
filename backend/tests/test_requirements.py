@@ -210,6 +210,7 @@ class RequirementsAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generated.status_code, 200)
         body = generated.json()
         self.assertEqual(body, {
+            "revision": 1,
             "template": {"mode": "requirements", "version": 1},
             "draft": {"summary": "Add a test-message button", "business_context": "",
                       "requirements": self.preview, "acceptance_criteria": "", "open_questions": ""},

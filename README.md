@@ -92,11 +92,53 @@ and mock Jira submission. Its one active template is `requirements`, version `1`
 By default, generation is deterministic and offline: the first nonempty sanitized line becomes
 `summary`, the entire sanitized input becomes `requirements`, and the other fields
 remain empty. Users must supply missing business context and acceptance criteria.
-The stub does not infer requirements, invent questions, or produce AI-quality
-summaries. Explicitly configured OpenAI mode generates a structured initial draft
-from sanitized context using the Responses API and Structured Outputs. Semantic
-completeness analysis, clarification generation, interactive refinement, canonical
-draft history, and real Jira integration remain unimplemented.
+Task 5 adds iterative gap analysis, partial answers and explicit dispositions,
+section proposals, independent accept/reject decisions, and protected sections.
+The session owns the sanitized draft and revision; edits stay local until an action.
+The offline stub asks only about empty required fields and copies literal answers
+into empty sections. It does not perform semantic analysis. Configured OpenAI mode
+supports initial generation, gap analysis and targeted refinement through the same
+Responses API client and strict Structured Outputs. Jira remains mock-only.
+
+
+### Clarification API (requirements v1)
+
+- `POST /api/clarifications/analyze`: synchronize reviewed edits and return 0–5 questions.
+- `POST /api/clarifications/refine`: submit partial `answers` with `question_id`,
+  `status`, and literal `answer`; return proposals without applying them.
+- `POST /api/clarifications/decisions`: submit `batch_id` and individual
+  `{proposal_id, action: "accept"|"reject"}` decisions, or `allow_sections` to
+  re-enable suggestions. Rejections protect sections for the session.
+- `GET /api/sessions/{session_id}/refinement`: recover the current checkpoint;
+  does not refresh the 900-second session TTL.
+
+Mutations carry `session_id`, `template: {mode: "requirements", version: 1}`,
+`expected_revision`, a fresh client `request_id`, and the current five-field `draft`.
+Identical retries reuse their request ID; the last 32 successful IDs retain keyed
+request digests, never raw inputs. Reusing an ID with changed content or submitting
+an obsolete revision returns safe `409 REVISION_CONFLICT`. Recovery is explicit;
+local edits are preserved until the user chooses to replace them. All explicit
+question-status corrections are allowed; only `answered` carries answer text.
+Resolved normalized duplicates are suppressed unless changed associated sections
+provide new quoted evidence. Earlier dispositions remain in the ledger.
+The compact ledger retains decisions and answers for this ephemeral session only.
+
+Sanitization changes return `preview_review_required` with reviewed `draft` and
+`answers`; resubmit the sanitized content after reviewing it. A signed, sanitized
+`review_token` carries any history/proposal redactions into that retry without
+storing original values or a pending draft. Return the token with the reviewed
+mutation; its session and revision are verified, and the whole payload is rechecked. These responses do
+not commit a draft or refresh TTL. Successful mutations commit atomically and
+refresh TTL; failed operations do neither. A cancelled HTTP request can leave an
+admitted worker finishing successfully; recover via GET or retry the same request.
+
+Generation additionally returns `revision`. Task 5 submission adds
+`expected_revision` and `request_id` to `/api/create-ticket`; older clients can omit
+both. Submission consumes the session once, including after client cancellation;
+subsequent requests return `SESSION_UNAVAILABLE`, never another ticket. Before Jira,
+the UI previews unresolved/delegated additions to `open_questions`. Incorporating
+or declining them is explicit; neither choice blocks submission. No database
+migration is required; restart/regenerate old in-memory sessions.
 
 ## Generation configuration and offline verification
 
@@ -115,8 +157,8 @@ Application initialization validates the provider and key presence without a net
 request. It does not verify authentication or model access.
 
 OpenAI requests use a 60-second SDK timeout, zero automatic SDK retries, and
-`store=False`. There is no automatic fallback to the stub. Only confirmed sanitized
-context and static generation instructions cross the model boundary. User edits
+`store=False`. There is no automatic fallback to the stub. Only sanitized context, current draft, question/answer state and static instructions
+cross the model boundary. User edits
 that introduce sensitive content require a revised preview confirmation first.
 
 The model must return exactly the five requirements-v1 string fields. Unsupported
@@ -196,7 +238,7 @@ chips remain configurable, while credential rules cannot be disabled.
 
 Editing a preview triggers another backend check. If it changes the text, the
 updated preview must be reviewed and submitted again before generation. The
-active generator remains a local stub; no live OpenAI integration is enabled.
+default generator is an offline stub; explicitly configured OpenAI mode is available.
 Session validity and the expiry lifecycle are implemented as described below.
 
 Synthetic-only backend verification (using existing environment dependencies):

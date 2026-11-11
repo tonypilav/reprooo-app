@@ -106,6 +106,11 @@ class Masker:
             for pattern in rule.patterns:
                 for text in originals:
                     for match in pattern.finditer(text):
+                        # An inert token's label is not a new credential label,
+                        # including when punctuation follows its closing bracket.
+                        if any(span.start() <= match.start() < span.end()
+                               for span in PLACEHOLDER.finditer(text)):
+                            continue
                         value = match.group("value") if "value" in pattern.groupindex else match.group()
                         if value[:1] in ("\"", "'") and value[-1:] == value[:1]:
                             value = value[1:-1]
