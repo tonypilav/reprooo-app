@@ -171,8 +171,13 @@ These findings describe the historical prototype, not the current implementation
   Manual edits synchronize only on explicit operations. Recovery and replay use the
   existing transactional session ownership. Jira open-question additions require
   explicit confirmation. Generation still starts with empty `open_questions`.
-- Final section approvals (Task 6), persistent history and real Jira integration
-  remain unimplemented. The offline stub remains intentionally non-semantic.
+- Task 6 adds explicit final preparation through empty decisions, an immutable
+  reviewed snapshot with revision and unresolved-question metadata, copy/Markdown
+  export, snapshot-based mock submission, and a clean reset. Required sections and
+  pending local clarification input gate preparation; unresolved questions and
+  unaccepted proposals do not. Any subsequent edit invalidates the snapshot.
+- Per-section approvals, persistent history and real Jira integration remain out
+  of scope. The offline stub remains intentionally non-semantic.
 
 The rest of this document continues to define the target MVP. Current structural
 checks and free-text Open Questions do not implement the future analysis/question

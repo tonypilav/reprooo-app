@@ -111,6 +111,8 @@ function App() {
   }
 
   function handleReset() {
+    setText("");
+    setEnabledRules(rules.filter((rule) => rule.enabled_by_default || rule.locked).map((rule) => rule.key));
     setSessionId(null);
     setSessionUnavailable(false);
     setMaskedText("");

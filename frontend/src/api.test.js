@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { afterEach, mock, test } from "node:test";
 import { transformWithOxc } from "vite";
 import * as api from "./api.js";
+import * as finalization from "./finalization.js";
 import * as refinementState from "./refinementState.js";
 import { t } from "./texts.js";
 
@@ -75,7 +76,7 @@ async function mount(filename) {
   const pending = [];
   const createElement = (type, props, ...children) => ({ type, props: props || {}, children });
   const deps = {
-    ...api, ...refinementState, t, createElement,
+    ...api, ...refinementState, ...finalization, t, createElement,
     getMaskRules(...args) {
       const result = api.getMaskRules(...args);
       pending.push(result);
@@ -99,6 +100,7 @@ async function mount(filename) {
   };
   for (const name of ["Select", "Alert", "Box", "Button", "Container", "Group", "Image", "Paper", "Stack", "Text", "Textarea", "Title", "Badge"]) deps[name] = name;
   const source = (await readFile(new URL(filename, import.meta.url), "utf8"))
+    .replace(/^import ["'][^"']+\.css["'];/gm, "")
     .replace(/^import[\s\S]*?from\s+["'][^"']+["'];/gm, "");
   const { code } = await transformWithOxc(source, filename, { jsx: { runtime: "classic", pragma: "createElement" } });
   const componentName = filename.includes("DraftEditor") ? "DraftEditor" : "App";
@@ -116,7 +118,7 @@ function nodes(tree) {
   return [tree, ...tree.children.flatMap(nodes)];
 }
 function find(tree, type, text) {
-  const node = nodes(tree).find((node) => node.type === type && (text === undefined || node.children.includes(text) || node.props.label === text));
+  const node = nodes(tree).find((node) => node.type === type && (text === undefined || node.children.includes(text) || (text === t.finalization.prepare && node.children.includes(t.finalization.update)) || node.props.label === text || node.props["aria-label"] === text));
   assert.ok(node, `Missing ${type}: ${text}`);
   return node;
 }
@@ -124,11 +126,12 @@ const change = (node, value) => node.props.onChange({ currentTarget: { value } }
 
 async function previewApp(generationResponse, templateResponse = response(200, requirementsTemplate)) {
   const rules = [{ key: "secrets", enabled_by_default: true, locked: true }, { key: "emails", enabled_by_default: true }];
-  const fetch = mock.method(globalThis, "fetch", async (url) => {
+  const fetch = mock.method(globalThis, "fetch", async (url, options) => {
     if (url.endsWith("mask-rules")) return response(200, rules);
     if (url.endsWith("mask-preview")) return response(200, { session_id: sid, masked_text: "Synthetic preview" });
     if (url.endsWith("generate-draft")) return generationResponse;
     if (url.includes("templates/")) return typeof templateResponse === "function" ? templateResponse() : templateResponse;
+    if (url.endsWith("/decisions")) return response(200, clarificationCheckpoint(JSON.parse(options.body).draft));
     if (url.endsWith("create-ticket")) return response(404, unavailable);
     assert.fail(`Unexpected request: ${url}`);
   });
@@ -154,8 +157,8 @@ test("preview recovery preserves text/rules, disables requests, and restarts exp
   assert.equal(fetch.mock.callCount(), calls);
   find(tree, "Button", t.editor.reset).props.onClick();
   tree = app.render();
-  assert.equal(find(tree, "Textarea", t.input.title).props.value, "Original synthetic context");
-  assert.deepEqual(find(tree, "MaskRuleToggles").props.value, ["secrets"]);
+  assert.equal(find(tree, "Textarea", t.input.title).props.value, "");
+  assert.deepEqual(find(tree, "MaskRuleToggles").props.value, ["secrets", "emails"]);
   assert.equal(nodes(tree).some((node) => node.type === "DraftEditor"), false);
 });
 test("unrelated generation errors preserve normal retry", async () => {
@@ -172,6 +175,7 @@ test("ticket recovery preserves edited draft, clears session, disables resubmiss
   let props = find(app.render(), "DraftEditor").props;
   editor.render(props);
   change(find(editor.render(props), "Textarea", summaryLabel), "Edited synthetic title");
+  await find(editor.render(props), "Button", "Сформировать итоговую задачу").props.onClick();
   await find(editor.render(props), "Button", t.editor.create).props.onClick();
   props = find(app.render(), "DraftEditor").props;
   assert.equal(props.sessionId, null);
@@ -183,12 +187,14 @@ test("ticket recovery preserves edited draft, clears session, disables resubmiss
   assert.equal(fetch.mock.callCount(), calls);
   find(tree, "Button", t.editor.reset).props.onClick();
   tree = app.render();
-  assert.equal(find(tree, "Textarea", t.input.title).props.value, "Original synthetic context");
-  assert.deepEqual(find(tree, "MaskRuleToggles").props.value, ["secrets"]);
+  assert.equal(find(tree, "Textarea", t.input.title).props.value, "");
+  assert.deepEqual(find(tree, "MaskRuleToggles").props.value, ["secrets", "emails"]);
 });
 
 test("unrelated submission errors keep draft editable and allow retry", async () => {
-  const fetch = mock.method(globalThis, "fetch", async () => response(500, { detail: "Processing failed" }));
+  const fetch = mock.method(globalThis, "fetch", async (url, options) => url.endsWith('/decisions')
+    ? response(200, clarificationCheckpoint(JSON.parse(options.body).draft))
+    : response(500, { detail: "Processing failed" }));
   const onUnavailable = mock.fn();
   const editor = await mount("./DraftEditor.jsx");
   const props = {
@@ -198,13 +204,15 @@ test("unrelated submission errors keep draft editable and allow retry", async ()
   };
   editor.render(props);
   change(find(editor.render(props), "Textarea", summaryLabel), "User edited draft");
+  await find(editor.render(props), "Button", "Сформировать итоговую задачу").props.onClick();
   await find(editor.render(props), "Button", t.editor.create).props.onClick();
   const tree = editor.render(props);
   assert.equal(onUnavailable.mock.callCount(), 0);
   assert.equal(find(tree, "Textarea", summaryLabel).props.value, "User edited draft");
-  assert.equal(find(tree, "Button", t.editor.create).props.disabled, false);
-  await find(tree, "Button", t.editor.create).props.onClick();
-  assert.equal(fetch.mock.callCount(), 2);
+  assert.equal(find(tree, "Button", t.editor.create).props.disabled, true);
+  await find(tree, "Button", "Сформировать итоговую задачу").props.onClick();
+  await find(editor.render(props), "Button", t.editor.create).props.onClick();
+  assert.equal(fetch.mock.callCount(), 4);
 });
 
 test("template lookup follows generation metadata and verifies mode/version", async () => {
@@ -245,7 +253,7 @@ test("five fields are ordered and independently editable; only three gate submis
   const fields = nodes(tree).filter((node) => node.type === "Textarea");
   assert.deepEqual(fields.map((node) => node.props.label), requirementsTemplate.fields.map((field) => field.label));
   assert.deepEqual(fields.map((node) => node.props.withAsterisk), [true, true, false, true, false]);
-  assert.equal(find(tree, "Button", t.editor.create).props.disabled, true);
+  assert.equal(find(tree, "Button", "Сформировать итоговую задачу").props.disabled, true);
   const edited = {};
   for (const field of requirementsTemplate.fields) {
     edited[field.key] = `Edited ${field.key}`;
@@ -253,21 +261,22 @@ test("five fields are ordered and independently editable; only three gate submis
   }
   tree = editor.render(props);
   for (const field of requirementsTemplate.fields) assert.equal(find(tree, "Textarea", field.label).props.value, edited[field.key]);
-  assert.equal(find(tree, "Button", t.editor.create).props.disabled, false);
+  assert.equal(find(tree, "Button", "Сформировать итоговую задачу").props.disabled, false);
   for (const field of requirementsTemplate.fields.filter((field) => field.required)) {
     change(find(editor.render(props), "Textarea", field.label), " \n ");
-    assert.equal(find(editor.render(props), "Button", t.editor.create).props.disabled, true);
+    assert.equal(find(editor.render(props), "Button", "Сформировать итоговую задачу").props.disabled, true);
     change(find(editor.render(props), "Textarea", field.label), edited[field.key]);
   }
   for (const field of requirementsTemplate.fields.filter((field) => !field.required)) {
     change(find(editor.render(props), "Textarea", field.label), "");
     edited[field.key] = "";
-    assert.equal(find(editor.render(props), "Button", t.editor.create).props.disabled, false);
+    assert.equal(find(editor.render(props), "Button", "Сформировать итоговую задачу").props.disabled, false);
   }
+  await find(editor.render(props), "Button", "Сформировать итоговую задачу").props.onClick();
   await find(editor.render(props), "Button", t.editor.create).props.onClick();
   const call = fetch.mock.calls.find((call) => call.arguments[0].endsWith("create-ticket"));
   const body = JSON.parse(call.arguments[1].body);
-  assert.equal(body.expected_revision, 1);
+  assert.equal(body.expected_revision, 2);
   assert.equal(typeof body.request_id, "string");
   const legacy = { ...body };
   delete legacy.expected_revision; delete legacy.request_id;
@@ -319,7 +328,7 @@ test("unsupported template lookup preserves pending draft; restart remains expli
   const count = fetch.mock.callCount();
   find(app.render(), "Button", t.editor.reset).props.onClick();
   assert.equal(fetch.mock.callCount(), count);
-  assert.equal(find(app.render(), "Textarea", t.input.title).props.value, "Original synthetic context");
+  assert.equal(find(app.render(), "Textarea", t.input.title).props.value, "");
 });
 
 
@@ -340,7 +349,7 @@ for (const [status, code, message] of [
     assert.equal(fetch.mock.calls.filter((call) => call.arguments[0].endsWith("generate-draft")).length, 2);
     find(app.render(), "Button", t.preview.back).props.onClick();
     tree = app.render();
-    assert.equal(find(tree, "Textarea", t.input.title).props.value, "Original synthetic context");
+    assert.equal(find(tree, "Textarea", t.input.title).props.value, "");
   });
 }
 
@@ -423,25 +432,31 @@ test('sanitized review requires an explicit action and preserves newer edits', a
 });
 
 for (const include of [true, false]) {
-  test(`open-question preview requires explicit ${include ? 'incorporation' : 'decline'} before Jira`, async () => {
+  test(`open-question preparation requires explicit ${include ? 'inclusion' : 'decline'}`, async () => {
     const state = clarificationCheckpoint();
     state.open_question_items = ['Who approves?', 'Решение делегировано реализации: Which algorithm?'];
-    const fetch = mock.method(globalThis, 'fetch', async (url) => url.endsWith('/analyze')
-      ? response(200, state) : response(200, { key: 'MOCK-5', summary: 'Synthetic', description: 'Synthetic' }));
-    const editor = await mount('./DraftEditor.jsx');
-    const props = editorProps();
-    editor.render(props);
+    const fetch = mock.method(globalThis, 'fetch', async (url, options) => {
+      if (url.endsWith('/create-ticket')) return response(200, { key: 'MOCK-5', summary: 'Synthetic', description: 'Synthetic' });
+      const body = JSON.parse(options.body);
+      return response(200, { ...state, draft: body.draft, revision: url.endsWith('/analyze') ? 2 : 3 });
+    });
+    const editor = await mount('./DraftEditor.jsx'); const props = editorProps(); editor.render(props);
     await find(editor.render(props), 'Button', t.clarification.analyze).props.onClick();
     change(find(editor.render(props), 'Textarea', 'Открытые вопросы'), 'Manual question');
-    await find(editor.render(props), 'Button', t.editor.create).props.onClick();
+    await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
     assert.equal(fetch.mock.callCount(), 1);
-    assert.equal(find(editor.render(props), 'Textarea', 'Открытые вопросы').props.value, 'Manual question');
     await find(editor.render(props), 'Button', include ? t.clarification.include : t.clarification.decline).props.onClick();
-    const body = JSON.parse(fetch.mock.calls[1].arguments[1].body);
-    assert.equal(body.expected_revision, 2);
-    assert.equal(body.draft.open_questions.startsWith('Manual question'), true);
-    assert.equal(body.draft.open_questions.includes('Who approves?'), include);
-    assert.equal(body.draft.open_questions.includes('Решение делегировано'), include);
+    assert.equal(fetch.mock.callCount(), 2);
+    const candidate = JSON.parse(fetch.mock.calls[1].arguments[1].body);
+    assert.deepEqual(candidate.decisions, []);
+    assert.equal(candidate.draft.open_questions.startsWith('Manual question'), true);
+    assert.equal(candidate.draft.open_questions.includes('Who approves?'), include);
+    assert.equal(candidate.draft.open_questions.includes('Решение делегировано'), include);
+    await find(editor.render(props), 'Button', t.editor.create).props.onClick();
+    const submitted = JSON.parse(fetch.mock.calls[2].arguments[1].body);
+    assert.deepEqual(submitted.draft, candidate.draft);
+    assert.equal(submitted.expected_revision, 3);
+    assert.ok(JSON.stringify(editor.render(props)).includes('Реальная задача в Jira не создавалась'));
   });
 }
 
@@ -588,4 +603,351 @@ test('pending input for superseded questions is not submitted against their repl
   assert.equal(find(editor.render(props), 'Textarea', t.clarification.answer).props.value, '');
   await find(editor.render(props), 'Button', t.clarification.refine).props.onClick();
   assert.deepEqual(JSON.parse(fetch.mock.calls[2].arguments[1].body).answers, []);
+});
+
+async function preparedEditor(state = clarificationCheckpoint()) {
+  const fetch = mock.method(globalThis, 'fetch', async (url, options) => url.endsWith('/create-ticket')
+    ? response(200, { key: 'MOCK-1', summary: 'Synthetic', description: 'Synthetic' })
+    : response(200, { ...state, draft: JSON.parse(options.body).draft }));
+  const editor = await mount('./DraftEditor.jsx'); const props = editorProps(); editor.render(props);
+  await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+  return { editor, props, fetch };
+}
+
+const hasCopy = (tree) => nodes(tree).some((n) => n.type === 'Button' && n.props['aria-label'] === t.finalization.copySummary);
+
+test('preparation freezes an independent snapshot with all sections and unresolved metadata', () => {
+  const state = pendingInputCheckpoint();
+  const snapshot = finalization.finalSnapshot(state, false);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.ok(Object.isFrozen(snapshot.draft));
+  assert.ok(Object.isFrozen(snapshot.questions[0]));
+  state.draft.summary = 'Changed'; state.question_history[0].text = 'Changed';
+  assert.equal(snapshot.draft.summary, 'Synthetic summary');
+  assert.equal(snapshot.questions[0].text, 'Synthetic q1?');
+  assert.equal(snapshot.revision, 2);
+  assert.equal(snapshot.inclusion, false);
+  for (const key of ['summary', 'business_context', 'acceptance_criteria']) {
+    assert.equal(finalization.finalSnapshot(clarificationCheckpoint({ ...completeDraft(), [key]: ' \n ' })), null);
+  }
+});
+
+for (const field of requirementsTemplate.fields) {
+  test(`editing ${field.key} invalidates exports and submission immediately`, async () => {
+    const { editor, props, fetch } = await preparedEditor();
+    const oldTree = editor.render(props);
+    assert.equal(hasCopy(oldTree), true);
+    change(find(oldTree, 'Textarea', field.label), 'Newer text');
+    assert.equal(hasCopy(editor.render(props)), false);
+    assert.equal(find(editor.render(props), 'Button', t.editor.create).props.disabled, true);
+    await find(oldTree, 'Button', t.editor.create).props.onClick();
+    assert.equal(fetch.mock.callCount(), 1);
+  });
+}
+
+test('in-flight preparation merges safely but never prepares newer edits, even edits reverted to the same value', async () => {
+  let finish;
+  mock.method(globalThis, 'fetch', async () => new Promise((resolve) => { finish = resolve; }));
+  const editor = await mount('./DraftEditor.jsx'); const props = editorProps(); editor.render(props);
+  const work = find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+  change(find(editor.render(props), 'Textarea', summaryLabel), 'New summary');
+  change(find(editor.render(props), 'Textarea', summaryLabel), completeDraft().summary);
+  finish(response(200, clarificationCheckpoint())); await work;
+  assert.equal(hasCopy(editor.render(props)), false);
+  assert.equal(find(editor.render(props), 'Button', t.editor.create).props.disabled, true);
+});
+
+test('sanitized preparation requires review and a second synchronization before export', async () => {
+  let count = 0;
+  const safe = { ...completeDraft(), requirements: '[REDACTED]' };
+  const fetch = mock.method(globalThis, 'fetch', async () => ++count === 1
+    ? response(200, { status: 'preview_review_required', draft: safe, review_token: 'synthetic-review' })
+    : response(200, clarificationCheckpoint(safe)));
+  const editor = await mount('./DraftEditor.jsx'); const props = editorProps(); editor.render(props);
+  await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+  assert.equal(hasCopy(editor.render(props)), false);
+  find(editor.render(props), 'Button', t.clarification.applyReview).props.onClick();
+  assert.equal(hasCopy(editor.render(props)), false);
+  await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+  assert.equal(hasCopy(editor.render(props)), true);
+  assert.equal(JSON.parse(fetch.mock.calls[1].arguments[1].body).review_token, 'synthetic-review');
+});
+
+for (const disposition of ['answered', 'left_to_implementation', 'needs_stakeholder_decision', 'not_applicable']) {
+  test(`pending ${disposition} blocks preparation until explicitly discarded`, async () => {
+    const { editor, props, fetch } = await preparedEditor(pendingInputCheckpoint());
+    const tree = editor.render(props);
+    if (disposition === 'answered') change(find(tree, 'Textarea', t.clarification.answer), 'Pending answer');
+    else find(tree, 'Select').props.onChange(disposition);
+    assert.equal(hasCopy(editor.render(props)), false);
+    await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+    assert.equal(fetch.mock.callCount(), 1);
+    assert.equal(find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.disabled, true);
+    find(editor.render(props), 'Button', 'Отменить несохранённые ответы и решения').props.onClick();
+    await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+    assert.equal(hasCopy(editor.render(props)), true);
+    const body = JSON.parse(fetch.mock.calls[1].arguments[1].body);
+    assert.deepEqual(body.decisions, []);
+    assert.equal(body.answers, undefined);
+  });
+}
+
+for (const action of ['accept', 'reject']) {
+  test(`${action} proposal invalidates snapshot; preparing does not automatically accept proposals`, async () => {
+    const { editor, props, fetch } = await preparedEditor(pendingInputCheckpoint());
+    assert.equal(hasCopy(editor.render(props)), true);
+    assert.ok(JSON.stringify(editor.render(props)).includes(t.finalization.proposals));
+    assert.equal(find(editor.render(props), 'Textarea', 'Бизнес-контекст').props.value, completeDraft().business_context);
+    await find(editor.render(props), 'Button', t.clarification[action]).props.onClick();
+    assert.equal(hasCopy(editor.render(props)), false);
+    assert.equal(JSON.parse(fetch.mock.calls[1].arguments[1].body).decisions[0].action, action);
+  });
+}
+
+test('final review retains unresolved and delegated questions when additions are declined', async () => {
+  const state = pendingInputCheckpoint();
+  state.questions[1].status = 'left_to_implementation';
+  state.open_question_items = ['Synthetic q1?', 'Решение делегировано реализации: Synthetic q2?'];
+  const { editor, props } = await preparedEditor(state);
+  assert.equal(hasCopy(editor.render(props)), false);
+  await find(editor.render(props), 'Button', t.clarification.decline).props.onClick();
+  const tree = editor.render(props);
+  assert.equal(hasCopy(tree), true);
+  const text = JSON.stringify(tree);
+  assert.ok(text.includes('Нерешённые и делегированные вопросы'));
+  assert.ok(text.includes('Synthetic q1?'));
+  assert.ok(text.includes(t.clarification.statuses.left_to_implementation));
+  assert.equal(find(tree, 'Textarea', 'Открытые вопросы').props.value, '');
+});
+
+test('Jira serializer matches adapter format and leaves Markdown and draft separate', () => {
+  const draft = { summary: '  Сводка ✓  ', business_context: '  Абзац 1\n\nАбзац 2  ', requirements: '  - α\n- β ',
+    acceptance_criteria: ' Условие X\nРезультат Y\n', open_questions: '  ' };
+  const snapshot = finalization.finalSnapshot(clarificationCheckpoint(draft));
+  const expected = 'Бизнес-контекст:\nАбзац 1\n\nАбзац 2\n\nТребования:\n- α\n- β\n\nКритерии приёмки:\nУсловие X\nРезультат Y';
+  assert.equal(finalization.serializeFinal(snapshot, 'summary'), 'Сводка ✓');
+  assert.equal(finalization.serializeFinal(snapshot), expected);
+  const markdown = finalization.serializeFinal(snapshot, 'markdown');
+  assert.ok(markdown.startsWith('## Краткое описание\n\n  Сводка ✓  '));
+  assert.ok(markdown.includes('## Открытые вопросы'));
+  assert.ok(!markdown.includes('Бизнес-контекст:'));
+  assert.deepEqual(snapshot.draft, draft);
+});
+
+for (const format of ['summary', 'description']) {
+  test(`Copy ${format} uses reviewed values; stale callbacks cannot copy`, async () => {
+    const writeText = mock.fn(async () => {});
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText } } });
+    try {
+      const { editor, props } = await preparedEditor();
+      const button = find(editor.render(props), 'Button', format === 'summary' ? 'Копировать краткое описание' : 'Копировать описание');
+      await button.props.onClick();
+      assert.equal(writeText.mock.calls[0].arguments[0], finalization.serializeFinal(finalization.finalSnapshot(clarificationCheckpoint()), format));
+      change(find(editor.render(props), 'Textarea', summaryLabel), 'Changed');
+      await button.props.onClick();
+      assert.equal(writeText.mock.callCount(), 1);
+    } finally { delete globalThis.navigator; }
+  });
+}
+
+test('clipboard denial is explicit and preserves the prepared result', async () => {
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async () => { throw new Error('denied'); } } } });
+  try {
+    const { editor, props } = await preparedEditor();
+    await find(editor.render(props), 'Button', 'Копировать краткое описание').props.onClick();
+    assert.ok(JSON.stringify(editor.render(props)).includes('Не удалось скопировать'));
+    assert.equal(hasCopy(editor.render(props)), true);
+  } finally { delete globalThis.navigator; }
+});
+
+test('Markdown download uses the complete reviewed snapshot and revokes its object URL', async () => {
+  let blob;
+  mock.method(URL, 'createObjectURL', (value) => { blob = value; return 'blob:synthetic'; });
+  const revoke = mock.method(URL, 'revokeObjectURL', () => {});
+  const link = { click: mock.fn() };
+  globalThis.document = { createElement: () => link };
+  try {
+    const { editor, props } = await preparedEditor();
+    const button = find(editor.render(props), 'Button', 'Скачать Markdown');
+    button.props.onClick();
+    assert.equal(await blob.text(), finalization.serializeFinal(finalization.finalSnapshot(clarificationCheckpoint()), 'markdown'));
+    assert.equal(blob.type, 'text/markdown;charset=utf-8');
+    assert.equal(link.download, 'requirements.md');
+    assert.equal(link.click.mock.callCount(), 1);
+    assert.equal(revoke.mock.calls[0].arguments[0], 'blob:synthetic');
+    change(find(editor.render(props), 'Textarea', summaryLabel), 'New edit');
+    button.props.onClick();
+    assert.equal(link.click.mock.callCount(), 1);
+  } finally { delete globalThis.document; }
+});
+
+for (const code of ['SESSION_UNAVAILABLE', 'REVISION_CONFLICT']) {
+  test(`${code} prevents export after preparation failure`, async () => {
+    const unavailable = mock.fn();
+    mock.method(globalThis, 'fetch', async () => response(code === 'SESSION_UNAVAILABLE' ? 404 : 409, { detail: { code } }));
+    const editor = await mount('./DraftEditor.jsx'); const props = { ...editorProps(), onSessionUnavailable: unavailable }; editor.render(props);
+    await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+    assert.equal(hasCopy(editor.render(props)), false);
+    assert.equal(find(editor.render(props), 'Button', t.editor.create).props.disabled, true);
+    assert.equal(unavailable.mock.callCount(), code === 'SESSION_UNAVAILABLE' ? 1 : 0);
+  });
+}
+
+test('recovery replaces state only by explicit adoption and invalidates preparation', async () => {
+  const { editor, props, fetch } = await preparedEditor();
+  fetch.mock.restore();
+  mock.method(globalThis, 'fetch', async () => response(200, clarificationCheckpoint({ ...completeDraft(), summary: 'Recovered summary' }, 8)));
+  await find(editor.render(props), 'Button', t.clarification.recover).props.onClick();
+  assert.equal(hasCopy(editor.render(props)), false);
+  assert.equal(find(editor.render(props), 'Textarea', summaryLabel).props.value, completeDraft().summary);
+  find(editor.render(props), 'Button', t.clarification.adopt).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', summaryLabel).props.value, 'Recovered summary');
+  assert.equal(hasCopy(editor.render(props)), false);
+});
+
+test('newer edits during mock submission survive the consumed-session result', async () => {
+  const { editor, props, fetch } = await preparedEditor();
+  fetch.mock.restore();
+  let finish;
+  const submit = mock.method(globalThis, 'fetch', async () => new Promise((resolve) => { finish = resolve; }));
+  const work = find(editor.render(props), 'Button', t.editor.create).props.onClick();
+  change(find(editor.render(props), 'Textarea', summaryLabel), 'Newer unsent summary');
+  finish(response(200, { key: 'MOCK-1', summary: 'Synthetic summary', description: 'Synthetic' })); await work;
+  const tree = editor.render(props);
+  assert.equal(find(tree, 'Textarea', summaryLabel).props.value, 'Newer unsent summary');
+  assert.ok(JSON.stringify(tree).includes('Реальная задача в Jira не создавалась'));
+  assert.equal(find(tree, 'Button', 'Сформировать итоговую задачу').props.disabled, true);
+  await find(tree, 'Button', t.editor.create).props.onClick();
+  assert.equal(submit.mock.callCount(), 1);
+});
+
+test('successful mock result resets to fresh context and default masking choices', async () => {
+  const { app, fetch } = await previewApp(response(200, { template: reference, draft: completeDraft(), revision: 1 }));
+  await find(app.render(), 'Button', t.preview.action).props.onClick();
+  const editor = await mount('./DraftEditor.jsx'); const props = find(app.render(), 'DraftEditor').props; editor.render(props);
+  fetch.mock.restore();
+  mock.method(globalThis, 'fetch', async (url, options) => url.endsWith('/create-ticket')
+    ? response(200, { key: 'MOCK-1', summary: 'Synthetic', description: 'Synthetic' })
+    : response(200, clarificationCheckpoint(JSON.parse(options.body).draft)));
+  await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+  await find(editor.render(props), 'Button', t.editor.create).props.onClick();
+  assert.ok(JSON.stringify(editor.render(props)).includes(t.editor.created));
+  find(editor.render(props), 'Button', t.editor.reset).props.onClick();
+  const tree = app.render();
+  assert.equal(find(tree, 'Textarea', t.input.title).props.value, '');
+  assert.deepEqual(find(tree, 'MaskRuleToggles').props.value, ['secrets', 'emails']);
+  assert.equal(nodes(tree).some((n) => n.type === 'DraftEditor'), false);
+  assert.equal(hasCopy(tree), false);
+});
+
+test('changing inclusion invalidates the snapshot and preserves manually written Open Questions', async () => {
+  const state = clarificationCheckpoint({ ...completeDraft(), open_questions: 'Manual question' });
+  state.open_question_items = ['Who approves?'];
+  const { editor, props } = await preparedEditor(state);
+  change(find(editor.render(props), 'Textarea', 'Открытые вопросы'), 'Manual question');
+  await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+  await find(editor.render(props), 'Button', t.clarification.decline).props.onClick();
+  assert.equal(hasCopy(editor.render(props)), true);
+  find(editor.render(props), 'Button', 'Пересмотреть включение вопросов').props.onClick();
+  assert.equal(hasCopy(editor.render(props)), false);
+  await find(editor.render(props), 'Button', t.clarification.include).props.onClick();
+  assert.equal(hasCopy(editor.render(props)), true);
+  assert.equal(find(editor.render(props), 'Textarea', 'Открытые вопросы').props.value, 'Manual question\n- Who approves?');
+});
+
+test('question edits arriving during preparation prevent a prepared snapshot', async () => {
+  const { editor, props, fetch } = await preparedEditor(pendingInputCheckpoint());
+  change(find(editor.render(props), 'Textarea', summaryLabel), 'Updated summary');
+  fetch.mock.restore();
+  let finish;
+  mock.method(globalThis, 'fetch', async () => new Promise((resolve) => { finish = resolve; }));
+  const work = find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+  change(find(editor.render(props), 'Textarea', t.clarification.answer), 'New pending answer');
+  finish(response(200, pendingInputCheckpoint())); await work;
+  assert.equal(hasCopy(editor.render(props)), false);
+  assert.equal(find(editor.render(props), 'Textarea', t.clarification.answer).props.value, 'New pending answer');
+});
+
+test('changing inclusion to decline removes only untouched automatic additions', async () => {
+  const state = clarificationCheckpoint(); state.open_question_items = ['Who approves?'];
+  const { editor, props } = await preparedEditor(state);
+  change(find(editor.render(props), 'Textarea', 'Открытые вопросы'), 'Manual question');
+  await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+  await find(editor.render(props), 'Button', t.clarification.include).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', 'Открытые вопросы').props.value, 'Manual question\n- Who approves?');
+  find(editor.render(props), 'Button', 'Пересмотреть включение вопросов').props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', 'Открытые вопросы').props.value, 'Manual question');
+  await find(editor.render(props), 'Button', t.clarification.decline).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', 'Открытые вопросы').props.value, 'Manual question');
+});
+
+test('sanitization review merges inclusion additions against the original local baseline', async () => {
+  const state = clarificationCheckpoint(); state.open_question_items = ['Who approves?'];
+  const { editor, props, fetch } = await preparedEditor(state);
+  change(find(editor.render(props), 'Textarea', 'Открытые вопросы'), 'Synthetic sensitive text');
+  await find(editor.render(props), 'Button', 'Сформировать итоговую задачу').props.onClick();
+  fetch.mock.restore();
+  mock.method(globalThis, 'fetch', async () => response(200, { status: 'preview_review_required',
+    draft: { ...completeDraft(), open_questions: '[REDACTED]\n- Who approves?' }, review_token: 'synthetic-review' }));
+  await find(editor.render(props), 'Button', t.clarification.include).props.onClick();
+  assert.equal(hasCopy(editor.render(props)), false);
+  find(editor.render(props), 'Button', t.clarification.applyReview).props.onClick();
+  assert.equal(find(editor.render(props), 'Textarea', 'Открытые вопросы').props.value, '[REDACTED]\n- Who approves?');
+});
+
+
+test('preparation shows initial action, then status, then update; duplicate requests are ignored', async () => {
+  const editor = await mount('./DraftEditor.jsx'); const props = editorProps();
+  assert.ok(nodes(editor.render(props)).some((n) => n.children.includes(t.finalization.prepare)));
+  let finish;
+  const fetch = mock.method(globalThis, 'fetch', async () => new Promise((resolve) => { finish = resolve; }));
+  const action = find(editor.render(props), 'Button', t.finalization.prepare);
+  const work = action.props.onClick();
+  await action.props.onClick();
+  assert.equal(fetch.mock.callCount(), 1);
+  finish(response(200, clarificationCheckpoint())); await work;
+  const tree = editor.render(props);
+  assert.ok(nodes(tree).some((n) => n.type === 'Text' && n.children.includes(t.finalization.ready) && n.props.role === 'status'));
+  assert.equal(nodes(tree).some((n) => n.type === 'Button' && (n.children.includes(t.finalization.prepare) || n.children.includes(t.finalization.update))), false);
+  change(find(tree, 'Textarea', summaryLabel), 'Changed');
+  assert.ok(nodes(editor.render(props)).some((n) => n.type === 'Button' && n.children.includes(t.finalization.update)));
+});
+
+test('notifications have explicit semantics and Russian messages', () => {
+  assert.deepEqual(finalization.finalNotification('copied'), { type: 'success', message: 'Скопировано.' });
+  assert.deepEqual(finalization.finalNotification('copyFailed'), { type: 'error', message: t.finalization.copyFailed });
+  assert.deepEqual(finalization.notificationColors, { success: 'green', error: 'red', info: 'gray' });
+});
+
+test('clipboard notifications render green success and red failure without false success', async () => {
+  let fail = false;
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async () => { if (fail) throw new Error('denied'); } } } });
+  try {
+    const { editor, props } = await preparedEditor();
+    await find(editor.render(props), 'Button', t.finalization.copySummary).props.onClick();
+    assert.equal(find(editor.render(props), 'Alert', t.finalization.copied).props.color, 'green');
+    fail = true;
+    await find(editor.render(props), 'Button', t.finalization.copyDescription).props.onClick();
+    assert.equal(find(editor.render(props), 'Alert', t.finalization.copyFailed).props.color, 'red');
+    assert.equal(nodes(editor.render(props)).some((n) => n.children.includes(t.finalization.copied)), false);
+  } finally { delete globalThis.navigator; }
+});
+
+test('export toolbar and mock submission use localized accessible controls', async () => {
+  const { editor, props } = await preparedEditor();
+  const tree = editor.render(props);
+  const toolbar = find(tree, 'div', t.finalization.toolbar);
+  assert.equal(toolbar.props.role, 'group');
+  for (const title of [t.finalization.copySummary, t.finalization.copyDescription, t.finalization.download]) {
+    const button = find(toolbar, 'Button', title);
+    assert.equal(button.props.variant, 'subtle');
+    assert.equal(button.props['aria-label'], title);
+    assert.equal(button.props.disabled, false);
+    assert.ok(nodes(button).some((n) => n.type === 'svg' && n.props['aria-hidden'] === 'true'));
+  }
+  assert.equal(find(tree, 'Button', 'Отправить в Jira').props.disabled, false);
+  assert.ok(JSON.stringify(tree).includes(t.finalization.mockNote));
+  assert.equal(nodes(tree).some((n) => n.type === 'a'), false);
+  const reset = nodes(tree).find((n) => n.props.className === 'reset-action');
+  assert.equal(find(reset, 'Button', t.editor.reset).props.variant, 'subtle');
 });
