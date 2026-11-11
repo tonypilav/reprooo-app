@@ -1,6 +1,6 @@
 from typing import TypeVar
 
-from openai import OpenAI, OpenAIError
+from openai import APITimeoutError, OpenAI
 from pydantic import BaseModel
 
 from app import config
@@ -10,6 +10,10 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class LLMError(Exception):
+    pass
+
+
+class LLMTimeoutError(LLMError):
     pass
 
 
@@ -23,11 +27,10 @@ class OpenAIClient:
             {"system": require_sanitized(system), "user": require_sanitized(user)},
             masker.context(set()),
         )
-        if self._client is None:
-            if not config.OPENAI_API_KEY:
-                raise LLMError("OPENAI_API_KEY is not set")
-            self._client = OpenAI(api_key=config.OPENAI_API_KEY, timeout=60)
+        timed_out = False
         try:
+            if self._client is None:
+                self._client = OpenAI(api_key=config.OPENAI_API_KEY, timeout=60, max_retries=0)
             response = self._client.responses.parse(
                 model=config.OPENAI_MODEL,
                 input=[
@@ -37,11 +40,18 @@ class OpenAIClient:
                 text_format=schema,
                 store=False,
             )
-        except OpenAIError:
+            if response.status != "completed" or any(
+                content.type == "refusal"
+                for item in response.output if item.type == "message"
+                for content in item.content
+            ) or response.output_parsed is None:
+                raise ValueError("Invalid model response")
+            return schema.model_validate(response.output_parsed.model_dump())
+        except APITimeoutError:
+            timed_out = True
+        except Exception:
             pass
-        else:
-            if response.output_parsed is None:
-                raise LLMError("The model returned no structured output")
-            return response.output_parsed
-        # Raise outside the handler: do not retain provider text in exception context.
+        # Raise outside handlers: retain no sensitive provider/validation context.
+        if timed_out:
+            raise LLMTimeoutError("Model request timed out")
         raise LLMError("Model request failed")

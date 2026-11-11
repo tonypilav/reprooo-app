@@ -161,9 +161,14 @@ These findings describe the historical prototype, not the current implementation
   normalization/validation, explicit template references, general-purpose editor
   fields, and mock Jira mapping from `summary`. Failed template loading retains
   the generated draft for retry without automatic regeneration or a new session.
-- Generation remains deterministic and offline. Real OpenAI generation, semantic
-  completeness analysis, interactive clarifications, canonical draft history,
-  approvals, and real Jira integration are not implemented.
+- Task 4 adds explicitly configured `LLM_PROVIDER=stub|openai` generation; stub
+  remains the offline default. OpenAI uses sanitized context, strict requirements-v1
+  Structured Outputs, a 60-second SDK timeout, zero automatic retries, and no
+  fallback. Configuration is validated at application initialization. Safe 502/504
+  errors preserve retry behavior and existing session semantics.
+- Semantic completeness analysis, interactive clarifications, canonical draft
+  history, approvals, and real Jira integration are not implemented. Task 4 keeps
+  generated `open_questions` empty and leaves unsupported business content empty.
 
 The rest of this document continues to define the target MVP. Current structural
 checks and free-text Open Questions do not implement the future analysis/question

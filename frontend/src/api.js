@@ -17,6 +17,10 @@ async function sessionResponse(response) {
     if (code === "SESSION_UNAVAILABLE" && response.status === 404) {
       error.code = code;
     }
+    if ((response.status === 502 && code === "LLM_GENERATION_FAILED")
+        || (response.status === 504 && code === "LLM_TIMEOUT")) {
+      error.code = code;
+    }
     throw error;
   }
   return response.json();

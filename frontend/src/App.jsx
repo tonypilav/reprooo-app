@@ -87,7 +87,9 @@ function App() {
       if (isSessionUnavailable(e)) {
         handleSessionUnavailable();
       } else {
-        setError(t.errors.generate);
+        setError(e.code === "LLM_TIMEOUT" ? t.errors.llmTimeout
+          : e.code === "LLM_GENERATION_FAILED" ? t.errors.llmGeneration
+          : t.errors.generate);
       }
     } finally {
       setLoading(false);

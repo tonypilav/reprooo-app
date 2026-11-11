@@ -89,12 +89,60 @@ The prototype implements context input, configurable masking and preview review,
 a general-purpose requirements template, field editing, safe in-memory sessions,
 and mock Jira submission. Its one active template is `requirements`, version `1`.
 
-Generation is deterministic and offline: the first nonempty sanitized line becomes
+By default, generation is deterministic and offline: the first nonempty sanitized line becomes
 `summary`, the entire sanitized input becomes `requirements`, and the other fields
 remain empty. Users must supply missing business context and acceptance criteria.
 The stub does not infer requirements, invent questions, or produce AI-quality
-summaries. Real LLM generation, semantic completeness analysis, interactive
-refinement, and real Jira integration remain unimplemented.
+summaries. Explicitly configured OpenAI mode generates a structured initial draft
+from sanitized context using the Responses API and Structured Outputs. Semantic
+completeness analysis, clarification generation, interactive refinement, canonical
+draft history, and real Jira integration remain unimplemented.
+
+## Generation configuration and offline verification
+
+Backend environment configuration (restart the backend after changing it):
+
+| Variable | Behavior |
+| --- | --- |
+| `LLM_PROVIDER` | `stub` (default) or `openai`; unknown values fail application initialization. |
+| `OPENAI_API_KEY` | Required and nonempty only for `openai`; keep exclusively in the backend environment. |
+| `OPENAI_MODEL` | Configurable model, default `gpt-5.4-mini`; verify access in your OpenAI project before a manual demo. |
+
+Use `LLM_PROVIDER=stub` for offline development. For real generation, configure
+`LLM_PROVIDER=openai` and provide `OPENAI_API_KEY` securely in the backend environment
+or its local dotenv file. Never put credentials in frontend/Vite configuration.
+Application initialization validates the provider and key presence without a network
+request. It does not verify authentication or model access.
+
+OpenAI requests use a 60-second SDK timeout, zero automatic SDK retries, and
+`store=False`. There is no automatic fallback to the stub. Only confirmed sanitized
+context and static generation instructions cross the model boundary. User edits
+that introduce sensitive content require a revised preview confirmation first.
+
+The model must return exactly the five requirements-v1 string fields. Unsupported
+information remains empty; supplied expected behavior may be rewritten as acceptance
+criteria without adding facts. `open_questions` stays empty in Task 4. The backend
+validates and sanitizes output, owns template metadata, and computes `missing_fields`.
+Structured output and instructions do not guarantee factual accuracy: review the draft.
+
+Generation failures return safe `502 / LLM_GENERATION_FAILED`; timeouts return
+`504 / LLM_TIMEOUT`. Provider details are not displayed. The UI retains input and
+preview for retry. Failures neither consume the session nor refresh its 900-second
+TTL; an expired session uses existing restart behavior. Jira submission remains mock-only.
+
+Run offline verification from the repository root (backend tests mock OpenAI):
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend backend/.venv/bin/python -B -m unittest discover -s backend/tests -q
+```
+
+From `frontend`:
+
+```bash
+node --test src/api.test.js
+npm run lint
+npm run build
+```
 
 ## Expected Impact
 

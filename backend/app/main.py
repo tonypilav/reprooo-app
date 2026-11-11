@@ -9,7 +9,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.llm_client import LLMClient
+from app.llm_client import create_llm_client
+from app.openai_client import LLMError, LLMTimeoutError
 from app.masking import Masker
 from app.masking_config import MASK_RULES
 from app.jira_adapter import JiraAdapter
@@ -77,6 +78,15 @@ async def session_unavailable(request, error):
     }})
 
 
+@app.exception_handler(LLMError)
+async def llm_error(request, error):
+    timeout = isinstance(error, LLMTimeoutError)
+    return JSONResponse(status_code=504 if timeout else 502, content={"detail": {
+        "code": "LLM_TIMEOUT" if timeout else "LLM_GENERATION_FAILED",
+        "message": "Generation timed out" if timeout else "Generation failed",
+    }})
+
+
 @app.exception_handler(InvalidDraftError)
 async def invalid_draft(request, error):
     return invalid_request_response()
@@ -112,7 +122,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-orchestrator = Orchestrator(Masker(), session_store, LLMClient(), Validator(), JiraAdapter())
+orchestrator = Orchestrator(Masker(), session_store, create_llm_client(), Validator(), JiraAdapter())
 
 
 async def run_session_operation(function, session_id, *args):

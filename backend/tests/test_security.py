@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import httpx2
+from openai import OpenAIError
 from pydantic import BaseModel
 
 from app.jira_adapter import JiraAdapter
@@ -279,14 +280,16 @@ class ConnectorTests(unittest.TestCase):
 
     def test_connector_rechecks_both_messages(self):
         client = self.client()
-        client._client.responses.parse.return_value.output_parsed = SyntheticResponse()
+        client._client.responses.parse.return_value = SimpleNamespace(
+            status="completed", output=[], output_parsed=SyntheticResponse()
+        )
         client.ask(SanitizedText("password=demo-provider"), SanitizedText("demo-provider"), SyntheticResponse)
         self.assertNotIn("demo-provider", repr(client._client.responses.parse.call_args))
         self.assertFalse(client._client.responses.parse.call_args.kwargs["store"])
 
     def test_provider_error_text_and_context_not_exposed(self):
         client = self.client()
-        client._client.responses.parse.side_effect = self.module.OpenAIError("password=demo-provider-error")
+        client._client.responses.parse.side_effect = OpenAIError("password=demo-provider-error")
         with self.assertRaises(self.module.LLMError) as result:
             client.ask(SanitizedText("safe"), SanitizedText("safe"), SyntheticResponse)
         self.assertEqual(str(result.exception), "Model request failed")

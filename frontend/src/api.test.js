@@ -310,3 +310,25 @@ test("unsupported template lookup preserves pending draft; restart remains expli
   assert.equal(fetch.mock.callCount(), count);
   assert.equal(find(app.render(), "Textarea", t.input.title).props.value, "Original synthetic context");
 });
+
+
+for (const [status, code, message] of [
+  [502, "LLM_GENERATION_FAILED", "Не удалось сгенерировать требования. Попробуйте ещё раз"],
+  [504, "LLM_TIMEOUT", "Превышено время ожидания ответа AI. Попробуйте повторить запрос"],
+]) {
+  test(`${status} generation error is safe, preserves context/preview, and permits retry`, async () => {
+    const { app, fetch } = await previewApp(response(status, { detail: { code, message: "untrusted secret payload" } }));
+    change(find(app.render(), "Textarea", t.preview.title), "Confirmed synthetic preview");
+    await find(app.render(), "Button", t.preview.action).props.onClick();
+    let tree = app.render();
+    assert.ok(nodes(tree).some((node) => node.children.includes(message)));
+    assert.equal(JSON.stringify(tree).includes("untrusted secret"), false);
+    assert.equal(find(tree, "Textarea", t.preview.title).props.value, "Confirmed synthetic preview");
+    assert.equal(find(tree, "Button", t.preview.action).props.disabled, false);
+    await find(tree, "Button", t.preview.action).props.onClick();
+    assert.equal(fetch.mock.calls.filter((call) => call.arguments[0].endsWith("generate-draft")).length, 2);
+    find(app.render(), "Button", t.preview.back).props.onClick();
+    tree = app.render();
+    assert.equal(find(tree, "Textarea", t.input.title).props.value, "Original synthetic context");
+  });
+}
