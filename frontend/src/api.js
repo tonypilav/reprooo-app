@@ -60,20 +60,34 @@ export async function generateDraft(sessionId, maskedText) {
   return sessionResponse(response);
 }
 
-export async function getTemplate(mode) {
-  const response = await fetch(`${API_URL}/api/templates/${mode}`);
+function templateReference(reference) {
+  if (!reference || typeof reference.mode !== "string" || !reference.mode
+      || !Number.isInteger(reference.version) || reference.version < 1) {
+    throw new Error("Template metadata is unavailable");
+  }
+  return { mode: reference.mode, version: reference.version };
+}
+
+export async function getTemplate(reference) {
+  const expected = templateReference(reference);
+  const response = await fetch(`${API_URL}/api/templates/${encodeURIComponent(expected.mode)}`);
   if (!response.ok) {
     throw new Error("Не удалось загрузить шаблон");
   }
-  return response.json();
+  const loaded = await response.json();
+  if (loaded.mode !== expected.mode || loaded.version !== expected.version
+      || !Array.isArray(loaded.fields)) {
+    throw new Error("Template metadata does not match the draft");
+  }
+  return loaded;
 }
 
-export async function createTicket(sessionId, draft) {
+export async function createTicket(sessionId, draft, template) {
   requireSession(sessionId);
   const response = await fetch(`${API_URL}/api/create-ticket`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, draft }),
+    body: JSON.stringify({ session_id: sessionId, template: templateReference(template), draft }),
   });
   return sessionResponse(response);
 }

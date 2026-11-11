@@ -2,9 +2,9 @@
 
 **Status:** Product requirements for the next development phase  
 **Audience:** Codex and project contributors  
-**Last updated:** 2026-11-10
+**Last updated:** 2026-11-11
 
-> This document defines the intended product and MVP. It is **not** a description of features already implemented. Verify the repository before making changes.
+> This document defines the intended product and MVP. Target workflow sections include future capabilities; the current implementation snapshot in section 9 distinguishes completed work. Verify the repository before making changes.
 
 ## 1. Product vision
 
@@ -37,20 +37,46 @@ A user pastes an underspecified request such as: “Add a button to send a test 
 
 The model must **not** invent unconfirmed choices such as button color, position, debounce interval, or access permissions. It should distinguish important decisions from optional implementation details.
 
-## 4. Draft structure
+## 4. Approved draft structure — requirements v1
 
-Use a configurable, general-purpose task template rather than the current bug-report-only template. Proposed sections:
+The backend-owned registry defines one active template: mode `requirements`, version
+`1`. The ordered plain-text string-map fields are:
 
-- **Summary** — concise task title.
-- **Business context / goal** — reason and expected value.
-- **User story** — when applicable; do not force it for purely technical tasks.
-- **Functional requirements** — explicit expected behavior.
-- **Acceptance criteria** — observable, testable outcomes.
-- **Edge cases and error handling** — relevant failure and boundary conditions.
-- **Dependencies and constraints** — integrations, permissions, compatibility, known technical limits.
-- **Open questions** — unresolved decisions, their importance, and ownership if known.
+| Field ID | UI label | Required for submission |
+| --- | --- | --- |
+| `summary` | Краткое описание | Yes |
+| `business_context` | Бизнес-контекст | Yes |
+| `requirements` | Требования | No |
+| `acceptance_criteria` | Критерии приёмки | Yes |
+| `open_questions` | Открытые вопросы | No |
 
-Do not fabricate details to fill a template. Represent unknowns explicitly. Fields may be optional or not applicable depending on task type.
+Business Context captures motivation, stakeholders, and expected value. Requirements
+can include functional behavior, constraints, dependencies, edge cases, and error
+handling where supplied. A user story can be expressed in these sections when useful;
+it is not a separate mandatory field. Acceptance Criteria contains observable,
+testable conditions; Open Questions retains unresolved information. Both remain
+plain text, optionally with newline-separated bullets, not structured objects.
+
+Only Summary, Business Context, and Acceptance Criteria are mandatory for submission.
+Generation may leave them empty and reports `missing_fields`; it must not invent
+business decisions or use placeholders such as `TBD` to appear complete. This is a
+structural submission check, not the future advisory readiness assessment.
+
+The generator returns `template: {"mode": "requirements", "version": 1}` alongside
+`draft` and `missing_fields`. Submission must include the same supported reference.
+Unknown fields and non-string values are rejected; missing allowed fields normalize
+to empty strings in configured order. Submitted required values must contain
+non-whitespace text. Client-provided template definitions are forbidden.
+
+This contract intentionally replaces the historical bug fields. `summary` is the
+internal ID and Jira Summary mapping; `title` and `bug` are not compatibility aliases.
+Frontend and backend must migrate together; reload and regenerate old browser drafts.
+No database migration, automatic conversion, or historical template storage is needed.
+
+The current offline stub copies the first nonempty sanitized input line to `summary`
+and all sanitized input to `requirements`. It leaves Business Context, Acceptance
+Criteria, and Open Questions empty. It neither performs AI refinement nor generates
+clarification questions. Semantic analysis and question lifecycle remain future work.
 
 ## 5. Completeness analysis and questions
 
@@ -108,9 +134,11 @@ Keep the existing modular architecture and current UI style as much as possible:
 
 Avoid broad rewrites, new infrastructure, or unrelated refactoring. Preserve working interfaces where feasible; explicitly plan and coordinate necessary API/schema changes between frontend and backend.
 
-## 9. Current implementation baseline (from read-only repository audit)
+## 9. Historical baseline and current implementation
 
-The audit reported:
+### Historical audit before Tasks 1–3
+
+The earlier audit reported:
 
 - Existing text input, configurable masking preview, editable draft UI, and mock ticket creation.
 - An active deterministic stub in `backend/app/llm_client.py`; `backend/app/openai_client.py` exists but is not wired into the flow.
@@ -119,7 +147,27 @@ The audit reported:
 - In-memory session/ticket storage and no automated tests found.
 - Important defects/risks: secrets restored into drafts, unvalidated session ID on ticket creation, placeholder collisions, and edits potentially bypassing masking before future LLM calls.
 
-These are **audit findings, not independently reverified facts in this document**. Codex should verify them against the current branch before implementing fixes.
+These findings describe the historical prototype, not the current implementation.
+
+### Current implementation after Tasks 1–3
+
+- Task 1 added irreversible supported-secret redaction, edited-preview rechecking,
+  safe processing/output boundaries, and synthetic regression tests. No original
+  masking values are retained or restored at this stage. Selective restoration
+  remains deferred to an explicitly approved final-review policy and confirmation.
+- Task 2 added sliding 900-second TTL, pre-worker API admission/reservations,
+  atomic session operations, cancellation ownership, and periodic expiry cleanup.
+- Task 3 replaces the bug structure with requirements v1 above, shared structural
+  normalization/validation, explicit template references, general-purpose editor
+  fields, and mock Jira mapping from `summary`. Failed template loading retains
+  the generated draft for retry without automatic regeneration or a new session.
+- Generation remains deterministic and offline. Real OpenAI generation, semantic
+  completeness analysis, interactive clarifications, canonical draft history,
+  approvals, and real Jira integration are not implemented.
+
+The rest of this document continues to define the target MVP. Current structural
+checks and free-text Open Questions do not implement the future analysis/question
+state model. Verify source code and tests before making implementation claims.
 
 ## 10. MVP priorities
 

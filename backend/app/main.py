@@ -28,7 +28,7 @@ from app.schemas import (
     TemplateFieldResponse,
 )
 from app.session_store import InvalidSessionIdError, SessionStore, SessionUnavailableError
-from app.validation import Validator
+from app.validation import InvalidDraftError, Validator
 from app.jira_adapter import JiraAdapter
 from fastapi.middleware.cors import CORSMiddleware
 from app.template_config import get_template
@@ -75,6 +75,11 @@ async def session_unavailable(request, error):
         "code": "SESSION_UNAVAILABLE",
         "message": "Session is unavailable. Restart the workflow.",
     }})
+
+
+@app.exception_handler(InvalidDraftError)
+async def invalid_draft(request, error):
+    return invalid_request_response()
 
 
 @app.exception_handler(InvalidSessionIdError)
@@ -137,6 +142,7 @@ def read_template(mode: str):
         raise HTTPException(status_code=404, detail="Template not found")
     return TemplateResponse(
         mode=template.mode,
+        version=template.version,
         fields=[
             TemplateFieldResponse(
                 key=field.key,
@@ -173,18 +179,20 @@ def mask_preview(request: MaskPreviewRequest):
 @app.post("/api/generate-draft", response_model=GenerateDraftResponse | PreviewReviewResponse)
 async def generate_draft(request: GenerateDraftRequest):
     try:
-        draft, missing_fields = await run_session_operation(
+        result = await run_session_operation(
             orchestrator.generate_draft, request.session_id, request.masked_text
         )
     except PreviewReviewRequired as review:
         return PreviewReviewResponse(masked_text=review.masked_text)
-    return GenerateDraftResponse(draft=draft, missing_fields=missing_fields)
+    return GenerateDraftResponse(
+        template=result.template, draft=result.draft, missing_fields=result.missing_fields
+    )
 
 @app.post("/api/create-ticket", response_model=CreateTicketResponse)
 async def create_ticket(request: CreateTicketRequest):
     try:
         ticket = await run_session_operation(
-            orchestrator.create_ticket, request.session_id, request.draft
+            orchestrator.create_ticket, request.session_id, request.draft, request.template
         )
     except IncompleteDraftError as error:
         raise HTTPException(

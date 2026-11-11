@@ -80,15 +80,29 @@ function App() {
         setError(t.preview.reviewRequired);
         return;
       }
-      const loadedTemplate = await getTemplate("bug");
       setDraftResult(data);
-      setTemplate(loadedTemplate);
+      setTemplate(null);
+      await handleLoadTemplate(data);
     } catch (e) {
       if (isSessionUnavailable(e)) {
         handleSessionUnavailable();
       } else {
         setError(t.errors.generate);
       }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLoadTemplate(result) {
+    setLoading(true);
+    setError("");
+    try {
+      const loaded = await getTemplate(result.template);
+      setTemplate(loaded);
+    } catch {
+      // Keep the generated draft for retry; do not regenerate or replace session.
+      setError(t.errors.template);
     } finally {
       setLoading(false);
     }
@@ -188,7 +202,21 @@ function App() {
               </Stack>
             )}
 
-            {step === "draft" && (
+            {step === "draft" && !template && (
+              <Stack>
+                <Text>{t.editor.templatePending}</Text>
+                <Group justify="space-between">
+                  <Button variant="default" onClick={handleReset} disabled={loading}>
+                    {t.editor.reset}
+                  </Button>
+                  <Button onClick={() => handleLoadTemplate(draftResult)} loading={loading}>
+                    {t.editor.retryTemplate}
+                  </Button>
+                </Group>
+              </Stack>
+            )}
+
+            {step === "draft" && template && (
               <DraftEditor
                 template={template}
                 initialDraft={draftResult.draft}

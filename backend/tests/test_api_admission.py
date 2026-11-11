@@ -14,7 +14,7 @@ from app.masking import Masker
 from app.orchestrator import Orchestrator
 from app.session_store import SessionStore, SessionUnavailableError
 from app.validation import Validator
-from test_sessions import FakeClock, draft
+from test_sessions import FakeClock, draft, reference
 
 
 class APIAdmissionTests(unittest.IsolatedAsyncioTestCase):
@@ -58,7 +58,7 @@ class APIAdmissionTests(unittest.IsolatedAsyncioTestCase):
             })
         if kind == "submission":
             return await self.client.post("/api/create-ticket", json={
-                "session_id": sid, "draft": draft(),
+                "session_id": sid, "template": reference().model_dump(), "draft": draft(),
             })
         return await self.client.delete(f"/api/sessions/{sid}")
 

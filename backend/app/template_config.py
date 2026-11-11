@@ -12,54 +12,53 @@ class TemplateField:
 @dataclass(frozen=True)
 class Template:
     mode: str
+    version: int
     fields: list[TemplateField]
 
 
-BUG_TEMPLATE = Template(
-    mode="bug",
+REQUIREMENTS_TEMPLATE = Template(
+    mode="requirements",
+    version=1,
     fields=[
         TemplateField(
-            key="title",
-            label="Название",
+            key="summary",
+            label="Краткое описание",
             required=True,
-            hint="Суть бага одной фразой, например: Не открывается обмен при смене даты и времени",
+            hint="Какое изменение требуется — кратко и по существу",
         ),
         TemplateField(
-            key="preconditions",
-            label="Предусловия",
+            key="business_context",
+            label="Бизнес-контекст",
             required=True,
-            hint="Что должно быть настроено или выполнено до начала шагов",
+            hint="Какую проблему решаем, для кого и какой результат ожидаем",
         ),
         TemplateField(
-            key="steps",
-            label="Шаги воспроизведения",
-            required=True,
-            hint="Пронумерованные действия, которые приводят к багу",
-        ),
-        TemplateField(
-            key="actual_result",
-            label="Фактический результат",
-            required=True,
-            hint="Что происходит на самом деле",
-        ),
-        TemplateField(
-            key="expected_result",
-            label="Ожидаемый результат",
-            required=True,
-            hint="Что должно происходить",
-        ),
-        TemplateField(
-            key="context",
-            label="Контекст",
+            key="requirements",
+            label="Требования",
             required=False,
-            hint="Дополнительные сведения: окружение, версия, ссылки, комментарий разработчика",
+            hint="Ожидаемое поведение, известные ограничения и особые случаи",
+        ),
+        TemplateField(
+            key="acceptance_criteria",
+            label="Критерии приёмки",
+            required=True,
+            hint="Наблюдаемые и проверяемые условия завершения задачи",
+        ),
+        TemplateField(
+            key="open_questions",
+            label="Открытые вопросы",
+            required=False,
+            hint="Недостающая информация, неоднозначности и нерешённые вопросы",
         ),
     ],
 )
 
-TEMPLATES = {BUG_TEMPLATE.mode: BUG_TEMPLATE}
+TEMPLATES = {REQUIREMENTS_TEMPLATE.mode: REQUIREMENTS_TEMPLATE}
 
 
 def get_template(mode: str) -> Template:
     return TEMPLATES[mode]
 
+
+def get_active_template() -> Template:
+    return REQUIREMENTS_TEMPLATE

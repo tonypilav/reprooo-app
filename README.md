@@ -31,7 +31,7 @@ The target workflow consists of six stages:
 
 The user controls the number of refinement iterations and makes the final decision about task readiness.
 
-## Key Capabilities
+## Key Capabilities (Target Product)
 
 - **Context-aware analysis:** identifies potential gaps based on the type of task and the supplied information.
 - **Structured requirements:** generates business context, functional requirements, acceptance criteria, constraints, and relevant edge cases.
@@ -85,13 +85,16 @@ The MVP focuses on demonstrating the complete requirements refinement workflow:
 
 ### Current Implementation Status
 
-The repository already contains the frontend workflow, configurable masking, session handling, a template-driven draft editor, an orchestration layer, and a mock Jira adapter.
+The prototype implements context input, configurable masking and preview review,
+a general-purpose requirements template, field editing, safe in-memory sessions,
+and mock Jira submission. Its one active template is `requirements`, version `1`.
 
-However, the transition from the original bug-report prototype to the requirements refinement workflow is still in progress.
-
-In particular, real LLM generation is not yet connected to the active workflow, iterative clarification is not yet implemented, and the existing bug-report template must be replaced.
-
-The current application should therefore be considered a **working prototype under active development**, not a completed implementation of all capabilities described above.
+Generation is deterministic and offline: the first nonempty sanitized line becomes
+`summary`, the entire sanitized input becomes `requirements`, and the other fields
+remain empty. Users must supply missing business context and acceptance criteria.
+The stub does not infer requirements, invent questions, or produce AI-quality
+summaries. Real LLM generation, semantic completeness analysis, interactive
+refinement, and real Jira integration remain unimplemented.
 
 ## Expected Impact
 
@@ -199,3 +202,75 @@ node --test src/api.test.js
 npm run lint
 npm run build
 ```
+
+## Requirements template v1 and API migration
+
+The backend-owned registry publishes exactly one active template through
+`GET /api/templates/requirements`. The response includes `mode`, `version`, and
+an ordered list of fields, labels, hints, and required flags:
+
+| Field ID | UI label | Required for submission |
+| --- | --- | --- |
+| `summary` | Краткое описание | Yes |
+| `business_context` | Бизнес-контекст | Yes |
+| `requirements` | Требования | No |
+| `acceptance_criteria` | Критерии приёмки | Yes |
+| `open_questions` | Открытые вопросы | No |
+
+All five fields are plain text. Acceptance criteria and open questions may use
+newline-separated bullets; there are no structured question objects or approval
+states. Requirements may include known constraints and error cases. Unconfirmed
+business details must remain unknown rather than be filled with `TBD` or invented
+content. `missing_fields` checks required-field emptiness, not semantic readiness.
+
+Generation keeps the `draft` and `missing_fields` properties and adds the exact
+reference used for that draft:
+
+```json
+{
+  "template": {"mode": "requirements", "version": 1},
+  "draft": {
+    "summary": "Add a test-message button",
+    "business_context": "",
+    "requirements": "Add a test-message button\nPlace it in service settings.",
+    "acceptance_criteria": "",
+    "open_questions": ""
+  },
+  "missing_fields": ["business_context", "acceptance_criteria"]
+}
+```
+
+Submission requires that reference alongside the edited draft:
+
+```json
+{
+  "session_id": "AAAAAAAAAAAAAAAAAAAAAA",
+  "template": {"mode": "requirements", "version": 1},
+  "draft": {
+    "summary": "Add a test-message button",
+    "business_context": "Allow operators to verify message delivery.",
+    "requirements": "Add the button in service settings.",
+    "acceptance_criteria": "Clicking the button sends one test message.",
+    "open_questions": ""
+  }
+}
+```
+
+The backend rejects unknown field IDs, non-string values, and unsupported template
+references without echoing submitted content. Missing allowed fields normalize to
+empty strings in template order. Empty required fields are allowed during generation,
+but empty or whitespace-only required submission fields fail with HTTP 422.
+Structural/reference errors use safe `INVALID_REQUEST` responses; incomplete drafts
+retain the existing `missing_fields` error. Invalid submissions do not consume the
+session or refresh its TTL. Template compatibility is checked inside the admitted
+operation. The existing preview-review and session-unavailable contracts are unchanged.
+
+This is a coordinated frontend/backend API migration: the old `bug` template and
+`title` field are not aliases. Older clients/drafts must be reloaded and regenerated;
+there is no automatic field conversion or historical-template support. `summary`
+maps to mock Jira Summary; nonempty remaining sections appear in configured order.
+A template's version identifies its structure, not a draft revision.
+
+The editor verifies the loaded template against the generated reference. If loading
+fails or metadata differs, the generated draft remains in local React state for
+an explicit retry. No replacement session or draft is created automatically.

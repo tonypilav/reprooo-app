@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from app.template_config import Template
 from app.masking import Masker
+from app.validation import Validator
 
 
 @dataclass(frozen=True)
@@ -17,11 +18,12 @@ class JiraAdapter:
         self._tickets: list[CreatedTicket] = []
 
     def create_ticket(self, draft: dict[str, str], template: Template) -> CreatedTicket:
-        summary = draft.get("title", "").strip()
+        draft = Validator().normalize(draft, template)
+        summary = draft["summary"].strip()
 
         parts = []
         for field in template.fields:
-            if field.key == "title":
+            if field.key == "summary":
                 continue
             value = draft.get(field.key, "").strip()
             if value:

@@ -17,10 +17,15 @@ from app.orchestrator import Orchestrator, PreviewReviewRequired
 from app.session_store import SessionStore, SessionUnavailableError
 from app.template_config import get_template
 from app.validation import Validator
+from app.schemas import TemplateReference
 
 
 class SyntheticResponse(BaseModel):
     value: str = "safe"
+
+
+def reference():
+    return TemplateReference(mode="requirements", version=1)
 
 
 def make_orchestrator(client=None):
@@ -28,7 +33,7 @@ def make_orchestrator(client=None):
 
 
 def complete_draft():
-    return {field.key: "Synthetic requirement" for field in get_template("bug").fields}
+    return {field.key: "Synthetic requirement" for field in get_template("requirements").fields}
 
 
 class MaskingTests(unittest.TestCase):
@@ -191,7 +196,7 @@ class BoundaryTests(unittest.TestCase):
             orchestrator.generate_draft(session, preview + " password=demo-new")
         client.generate_draft.assert_not_called()
         sanitized = result.exception.masked_text
-        client.generate_draft.return_value = {"title": "Safe draft"}
+        client.generate_draft.return_value = {"summary": "Safe draft"}
         orchestrator.generate_draft(session, sanitized)
         received = client.generate_draft.call_args.args[0]
         self.assertIsInstance(received, SanitizedText)
@@ -199,14 +204,14 @@ class BoundaryTests(unittest.TestCase):
 
     def test_generated_output_sanitized(self):
         client = Mock()
-        client.generate_draft.return_value = {"title": "token=demo-output", "context": "demo-output"}
+        client.generate_draft.return_value = {"summary": "token=demo-output", "requirements": "demo-output"}
         orchestrator = make_orchestrator(client)
         session, preview = orchestrator.mask_preview("Synthetic context")
-        draft, _ = orchestrator.generate_draft(session, preview)
+        draft = orchestrator.generate_draft(session, preview).draft
         self.assertNotIn("demo-output", repr(draft))
 
     def test_generated_unknown_keys_and_nonstring_values_rejected(self):
-        for result in [{"password=demo-key": "value"}, {"title": {"password": "demo-nested"}}]:
+        for result in [{"password=demo-key": "value"}, {"summary": {"password": "demo-nested"}}]:
             client = Mock()
             client.generate_draft.return_value = result
             orchestrator = make_orchestrator(client)
@@ -216,7 +221,7 @@ class BoundaryTests(unittest.TestCase):
 
     def test_stub_rejects_raw_text(self):
         with self.assertRaises(TypeError):
-            LLMClient().generate_draft("password=demo-pass", get_template("bug"))
+            LLMClient().generate_draft("password=demo-pass", get_template("requirements"))
 
     def test_ticket_edits_sanitized_before_adapter(self):
         orchestrator = make_orchestrator()
@@ -224,9 +229,9 @@ class BoundaryTests(unittest.TestCase):
         spy = Mock(wraps=orchestrator._jira_adapter)
         orchestrator._jira_adapter = spy
         draft = complete_draft()
-        draft["title"] = "password=demo-ticket"
-        draft["context"] = "demo-ticket"
-        ticket = orchestrator.create_ticket(session, draft)
+        draft["summary"] = "password=demo-ticket"
+        draft["requirements"] = "demo-ticket"
+        ticket = orchestrator.create_ticket(session, draft, reference())
         self.assertNotIn("demo-ticket", repr(spy.create_ticket.call_args))
         self.assertNotIn("demo-ticket", repr(ticket))
 
@@ -234,17 +239,17 @@ class BoundaryTests(unittest.TestCase):
         orchestrator = make_orchestrator()
         orchestrator._jira_adapter = Mock()
         draft = complete_draft()
-        draft["title"] = "api_key=demo-ticket"
+        draft["summary"] = "api_key=demo-ticket"
         with self.assertRaises(SessionUnavailableError):
-            orchestrator.create_ticket("A" * 22, draft)
+            orchestrator.create_ticket("A" * 22, draft, reference())
         orchestrator._jira_adapter.create_ticket.assert_not_called()
 
     def test_adapter_direct_calls_sanitized_before_storage(self):
         adapter = JiraAdapter()
         draft = complete_draft()
-        draft["title"] = "Authorization: Basic ZGVtbzpwYXNz"
-        draft["context"] = "ZGVtbzpwYXNz"
-        ticket = adapter.create_ticket(draft, get_template("bug"))
+        draft["summary"] = "Authorization: Basic ZGVtbzpwYXNz"
+        draft["requirements"] = "ZGVtbzpwYXNz"
+        ticket = adapter.create_ticket(draft, get_template("requirements"))
         self.assertNotIn("ZGVtbzpwYXNz", repr(ticket))
         self.assertNotIn("ZGVtbzpwYXNz", repr(adapter._tickets))
 
@@ -315,8 +320,8 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("draft", response.json())
         draft = complete_draft()
-        draft["context"] = "password=demo-ticket-api"
-        response = await self.client.post("/api/create-ticket", json={"session_id": preview["session_id"], "draft": draft})
+        draft["requirements"] = "password=demo-ticket-api"
+        response = await self.client.post("/api/create-ticket", json={"session_id": preview["session_id"], "template": reference().model_dump(), "draft": draft})
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("demo-ticket-api", response.text)
         self.assertTrue(response.json()["key"].startswith("MOCK-"))
@@ -334,7 +339,7 @@ class APITests(unittest.IsolatedAsyncioTestCase):
 
     async def test_generated_api_output_sanitized(self):
         self.orchestrator._llm_client = Mock()
-        self.orchestrator._llm_client.generate_draft.return_value = {"title": "password=demo-generated"}
+        self.orchestrator._llm_client.generate_draft.return_value = {"summary": "password=demo-generated"}
         preview = (await self.client.post("/api/mask-preview", json={"text": "Synthetic context"})).json()
         response = await self.client.post("/api/generate-draft", json={"session_id": preview["session_id"], "masked_text": preview["masked_text"]})
         self.assertEqual(response.status_code, 200)

@@ -32,7 +32,7 @@ function DraftEditor({ template, initialDraft, sessionId, onReset, onSessionUnav
     setLoading(true);
     setError("");
     try {
-      const result = await createTicket(sessionId, draft);
+      const result = await createTicket(sessionId, draft, template);
       setTicket(result);
     } catch (error) {
       if (isSessionUnavailable(error)) {
@@ -87,7 +87,7 @@ function DraftEditor({ template, initialDraft, sessionId, onReset, onSessionUnav
           }
           error={missing.includes(field.key) ? t.editor.fillField : undefined}
           autosize
-          minRows={field.key === "title" ? 1 : 3}
+          minRows={field.key === "summary" ? 1 : 3}
         />
       ))}
 

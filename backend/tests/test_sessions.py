@@ -15,6 +15,7 @@ from app.orchestrator import IncompleteDraftError, Orchestrator, PreviewReviewRe
 from app.session_store import InvalidSessionIdError, SessionStore, SessionUnavailableError
 from app.template_config import get_template
 from app.validation import Validator
+from app.schemas import TemplateReference
 
 
 class FakeClock:
@@ -46,8 +47,12 @@ class ObservedLock:
         self.lock.release()
 
 
+def reference():
+    return TemplateReference(mode="requirements", version=1)
+
+
 def draft():
-    return {field.key: "Synthetic requirement" for field in get_template("bug").fields}
+    return {field.key: "Synthetic requirement" for field in get_template("requirements").fields}
 
 
 class SessionTests(unittest.TestCase):
@@ -170,8 +175,8 @@ class OrchestratorFixture:
 class OrchestratorTests(OrchestratorFixture, unittest.TestCase):
     def test_valid_generation_refresh(self):
         self.clock.set(100)
-        result, _ = self.orchestrator.generate_draft(self.sid, self.preview)
-        self.assertIn("title", result)
+        result = self.orchestrator.generate_draft(self.sid, self.preview).draft
+        self.assertIn("summary", result)
         self.assertEqual(self.store._sessions[self.sid].expires_at, 1000)
 
     def test_preview_review_commits_metadata_refreshes_without_generation(self):
@@ -188,7 +193,7 @@ class OrchestratorTests(OrchestratorFixture, unittest.TestCase):
         self.clock.set(100)
         before = self.store.get(self.sid).issued.copy()
         with self.assertRaises(IncompleteDraftError):
-            self.orchestrator.create_ticket(self.sid, {"title": "password=demo-partial"})
+            self.orchestrator.create_ticket(self.sid, {"summary": "password=demo-partial"}, reference())
         self.assertEqual(self.store._sessions[self.sid].expires_at, 900)
         self.assertEqual(self.store.get(self.sid).issued, before)
         self.jira.create_ticket.assert_not_called()
@@ -201,8 +206,8 @@ class OrchestratorTests(OrchestratorFixture, unittest.TestCase):
         self.assertEqual(self.store._sessions[self.sid].expires_at, 900)
 
     def test_output_processing_failure_rolls_back_context(self):
-        self.client.generate_draft.return_value = {"title": "person@example.test"}
-        self.orchestrator._validator = Mock()
+        self.client.generate_draft.return_value = {"summary": "person@example.test"}
+        self.orchestrator._validator = Mock(wraps=Validator())
         self.orchestrator._validator.find_missing.side_effect = ValueError("synthetic failure")
         with self.assertRaises(ValueError):
             self.orchestrator.generate_draft(self.sid, self.preview)
@@ -212,22 +217,22 @@ class OrchestratorTests(OrchestratorFixture, unittest.TestCase):
     def test_expired_ticket_does_not_reach_jira(self):
         self.clock.set(900)
         with self.assertRaises(SessionUnavailableError):
-            self.orchestrator.create_ticket(self.sid, draft())
+            self.orchestrator.create_ticket(self.sid, draft(), reference())
         self.jira.create_ticket.assert_not_called()
 
     def test_successful_submission_consumes(self):
-        ticket = self.orchestrator.create_ticket(self.sid, draft())
+        ticket = self.orchestrator.create_ticket(self.sid, draft(), reference())
         self.assertTrue(ticket.key.startswith("MOCK-"))
         self.assertIsNone(self.store.get(self.sid))
         with self.assertRaises(SessionUnavailableError):
-            self.orchestrator.create_ticket(self.sid, draft())
+            self.orchestrator.create_ticket(self.sid, draft(), reference())
         self.assertEqual(self.jira.create_ticket.call_count, 1)
 
     def test_submission_failure_does_not_consume_or_refresh(self):
         self.jira.create_ticket.side_effect = ValueError("synthetic failure")
         self.clock.set(100)
         with self.assertRaises(ValueError):
-            self.orchestrator.create_ticket(self.sid, draft())
+            self.orchestrator.create_ticket(self.sid, draft(), reference())
         self.assertIsNotNone(self.store.get(self.sid))
         self.assertEqual(self.store._sessions[self.sid].expires_at, 900)
 
@@ -368,10 +373,10 @@ class ConcurrencyTests(OrchestratorFixture, unittest.TestCase):
             return adapter.create_ticket(fields, template)
         self.jira.create_ticket.side_effect = submit
         with ThreadPoolExecutor(max_workers=2) as pool:
-            first = pool.submit(self.orchestrator.create_ticket, self.sid, draft())
+            first = pool.submit(self.orchestrator.create_ticket, self.sid, draft(), reference())
             try:
                 self.assertTrue(self.started.wait(3))
-                second = pool.submit(self.orchestrator.create_ticket, self.sid, draft())
+                second = pool.submit(self.orchestrator.create_ticket, self.sid, draft(), reference())
                 self.assertTrue(self.lock.waiting.wait(3))
                 self.clock.set(960)
                 self.assertEqual(self.store.cleanup_expired(), 0)
@@ -403,7 +408,7 @@ class SessionAPITests(unittest.IsolatedAsyncioTestCase):
     async def requests_for(self, sid):
         return [
             await self.client.post("/api/generate-draft", json={"session_id": sid, "masked_text": self.preview}),
-            await self.client.post("/api/create-ticket", json={"session_id": sid, "draft": draft()}),
+            await self.client.post("/api/create-ticket", json={"session_id": sid, "template": reference().model_dump(), "draft": draft()}),
             await self.client.delete(f"/api/sessions/{sid}"),
         ]
 
@@ -411,7 +416,7 @@ class SessionAPITests(unittest.IsolatedAsyncioTestCase):
         deleted = self.store.create(Masker().context())
         self.store.delete(deleted)
         consumed = self.store.create(Masker().context())
-        self.orchestrator.create_ticket(consumed, draft())
+        self.orchestrator.create_ticket(consumed, draft(), reference())
         self.jira.reset_mock()
         self.clock.set(900)
         for sid in ["A" * 22, self.sid, deleted, consumed]:
@@ -427,7 +432,7 @@ class SessionAPITests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_null_malformed_and_wrong_type_ids(self):
         for sid in [None, 123, "", "short", "A" * 21 + "!", "A" * 21 + "\n"]:
             for route, extra in [("/api/generate-draft", {"masked_text": self.preview}),
-                                 ("/api/create-ticket", {"draft": draft()})]:
+                                 ("/api/create-ticket", {"template": reference().model_dump(), "draft": draft()})]:
                 for body in [extra, {**extra, "session_id": sid}]:
                     response = await self.client.post(route, json=body)
                     self.assertEqual(response.status_code, 422)
@@ -443,13 +448,13 @@ class SessionAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json(), {"status": "deleted"})
         self.assertIsNone(self.store.get(self.sid))
         sid = self.store.create(Masker().context())
-        response = await self.client.post("/api/create-ticket", json={"session_id": sid, "draft": draft()})
+        response = await self.client.post("/api/create-ticket", json={"session_id": sid, "template": reference().model_dump(), "draft": draft()})
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(self.store.get(sid))
 
     async def test_session_independent_reads_do_not_refresh(self):
         self.clock.set(100)
-        for route in ["/api/health", "/api/templates/bug", "/api/mask-rules"]:
+        for route in ["/api/health", "/api/templates/requirements", "/api/mask-rules"]:
             response = await self.client.get(route)
             self.assertEqual(response.status_code, 200)
         self.assertEqual(self.store._sessions[self.sid].expires_at, 900)
@@ -464,7 +469,7 @@ class SessionAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.store._sessions[self.sid].expires_at, 1100)
         self.clock.set(300)
-        response = await self.client.post("/api/create-ticket", json={"session_id": self.sid, "draft": {}})
+        response = await self.client.post("/api/create-ticket", json={"session_id": self.sid, "template": reference().model_dump(), "draft": {}})
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"]["message"], "Draft is incomplete")
         self.assertEqual(self.store._sessions[self.sid].expires_at, 1100)
