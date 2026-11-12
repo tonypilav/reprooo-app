@@ -148,7 +148,7 @@ Backend environment configuration (restart the backend after changing it):
 | --- | --- |
 | `LLM_PROVIDER` | `stub` (default) or `openai`; unknown values fail application initialization. |
 | `OPENAI_API_KEY` | Required and nonempty only for `openai`; keep exclusively in the backend environment. |
-| `OPENAI_MODEL` | Configurable model, default `gpt-5.4-mini`; verify access in your OpenAI project before a manual demo. |
+| `OPENAI_MODEL` | Only reviewed snapshot `gpt-5.4-mini-2026-03-17` is accepted; this is the default. Other model values fail closed. |
 
 Use `LLM_PROVIDER=stub` for offline development. For real generation, configure
 `LLM_PROVIDER=openai` and provide `OPENAI_API_KEY` securely in the backend environment
@@ -415,3 +415,12 @@ Task 7.3.1 adds a 256 KiB pre-parser HTTP body limit, bounded schemas and refine
 history, and atomic 100-session / 100-mock-ticket capacity limits. See
 [request and memory limits](docs/REQUEST_MEMORY_LIMITS.md) for exact budgets,
 configuration, rejection contracts, receipt sizing, frontend behavior and risks.
+
+### Public demo abuse protection (Task 7.3.2)
+
+See [the abuse protection policy](docs/ABUSE_PROTECTION.md) for exact quotas,
+production logging/start command, Render proxy verification, and accounting assumptions.
+The $4 conservative reservation ledger is **in memory per backend process lifetime**.
+It resets on restart and does **not** guarantee $5 total demo spend. Use a dedicated
+OpenAI project/key and independent provider-side usage monitoring; budget alerts
+are not hard spending limits. No automatic retries or live integration changes.

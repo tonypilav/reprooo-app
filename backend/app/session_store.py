@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Callable, Iterator
 
+from app.abuse_protection import PaidAccount, paid_session
 from app.masking import MaskingContext
 from app.config import get_storage_limit
 from app.limits import CapacityError
@@ -38,6 +39,7 @@ class SessionEntry:
     expires_at: float
     context: MaskingContext
     lock: Lock = field(default_factory=Lock)
+    account: PaidAccount = field(default_factory=PaidAccount)
     admitted: int = 0  # Executing and waiting operations with frozen eligibility.
 
 
@@ -152,7 +154,11 @@ class SessionStore:
                 if self._sessions.get(session_id) is not entry:
                     raise SessionUnavailableError("Session unavailable")
                 working = copy_context(entry.context)
-            yield working
+            account_token = paid_session.set(entry.account)
+            try:
+                yield working
+            finally:
+                paid_session.reset(account_token)
             with self._registry_lock:
                 if self._sessions.get(session_id) is not entry:
                     raise SessionUnavailableError("Session unavailable")

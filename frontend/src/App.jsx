@@ -13,7 +13,7 @@ import {
   Textarea,
   Title,
 } from "@mantine/core";
-import { generateDraft, getMaskRules, getTemplate, maskPreview, isSessionUnavailable } from "./api";
+import { generateDraft, getMaskRules, getTemplate, maskPreview, resourceErrorMessage, isSessionUnavailable } from "./api";
 import MaskRuleToggles from "./MaskRuleToggles";
 import DraftEditor from "./DraftEditor";
 import { t } from "./texts";
@@ -56,8 +56,8 @@ function App() {
       const data = await maskPreview(text, enabledRules);
       setSessionId(data.session_id);
       setMaskedText(data.masked_text);
-    } catch {
-      setError(t.errors.mask);
+    } catch (e) {
+      setError(resourceErrorMessage(e) || t.errors.mask);
     } finally {
       setLoading(false);
     }
@@ -87,9 +87,9 @@ function App() {
       if (isSessionUnavailable(e)) {
         handleSessionUnavailable();
       } else {
-        setError(e.code === "LLM_TIMEOUT" ? t.errors.llmTimeout
+        setError(resourceErrorMessage(e) || (e.code === "LLM_TIMEOUT" ? t.errors.llmTimeout
           : e.code === "LLM_GENERATION_FAILED" ? t.errors.llmGeneration
-          : t.errors.generate);
+          : t.errors.generate));
       }
     } finally {
       setLoading(false);

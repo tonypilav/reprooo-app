@@ -1,4 +1,5 @@
 """API admission regressions using real endpoints and controlled worker capacity."""
+from protection_fixture import isolate_protection
 import asyncio
 from threading import Event
 import unittest
@@ -19,6 +20,7 @@ from test_sessions import FakeClock, draft, reference
 
 class APIAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        isolate_protection(self)
         self.clock = FakeClock()
         self.store = SessionStore(clock=self.clock)
         self.llm = Mock(wraps=LLMClient())

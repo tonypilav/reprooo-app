@@ -2,6 +2,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 
+from app.abuse_protection import ProtectionError
 from app.masking_config import MASK_RULES, MaskRule
 
 
@@ -72,6 +73,7 @@ class Masker:
         Temporary value lookup is local to this call. Unlabeled values from another
         request cannot be recognized by remembering secrets, because none are stored.
         """
+        additions = {}
         result = {key: normalize_text(value) for key, value in fields.items()}
         rules = active_rules(set(context.enabled_keys))
         originals = tuple(result.values())
@@ -82,9 +84,11 @@ class Masker:
             if identity not in by_value:
                 while True:
                     candidate = f"[{label}:{uuid.uuid4()}]"
-                    if candidate not in context.issued and all(candidate not in text for text in originals):
+                    if candidate not in context.issued and candidate not in additions and all(candidate not in text for text in originals):
                         break
-                context.issued[candidate] = category
+                if len(context.issued) + len(additions) >= 2000:
+                    raise ProtectionError("MASKING_LIMIT_REACHED", 409)
+                additions[candidate] = category
                 by_value[identity] = candidate
             return by_value[identity]
 
@@ -152,6 +156,7 @@ class Masker:
                     for value, placeholder in sorted(known, key=lambda item: len(item[0]), reverse=True):
                         learned = re.compile(r"(?<!\w)" + re.escape(value) + r"(?!\w)")
                         result = {key: transform(text, lambda part: learned.sub(lambda match: placeholder, part)) for key, text in result.items()}
+        context.issued.update(additions)
         return result
 
     def for_model(self, fields: dict[str, str], context: MaskingContext) -> dict[str, SanitizedText]:

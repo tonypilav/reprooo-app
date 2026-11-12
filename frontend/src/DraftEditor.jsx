@@ -11,7 +11,7 @@ import {
   Textarea,
   Title,
 } from "@mantine/core";
-import { createTicket, isSessionUnavailable, clarificationOperation, getRefinement } from "./api";
+import { createTicket, resourceErrorMessage, isSessionUnavailable, clarificationOperation, getRefinement } from "./api";
 import { mergeCheckpoint, openQuestionsPreview } from "./refinementState";
 import { requiredFinalFields, finalSnapshot, serializeFinal, copyFinal, downloadFinal, finalNotification, notificationColors } from "./finalization";
 import "./finalization.css";
@@ -64,7 +64,7 @@ function DraftEditor({ template, initialDraft, initialRevision = 1, sessionId, o
     invalidate();
     if (isSessionUnavailable(error)) onSessionUnavailable();
     else if (error.code === 'REVISION_CONFLICT') { setConflict(true); setError(c.conflictError); }
-    else setError(c.failure);
+    else setError(resourceErrorMessage(error) || c.failure);
   }
   async function operate(kind, extra = {}, prepare = false, candidate = local.current, choice = inclusion) {
     if (!sessionId || conflict || busy.current || ticket) return;

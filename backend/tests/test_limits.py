@@ -1,4 +1,5 @@
 """Synthetic request/storage boundaries. Never make live provider requests."""
+from protection_fixture import isolate_protection
 from concurrent.futures import ThreadPoolExecutor
 import json
 from threading import Barrier
@@ -455,6 +456,7 @@ class JiraCapacityTests(unittest.TestCase):
 
 class LimitsAPITests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        isolate_protection(self)
         self.store = SessionStore()
         self.llm = Mock(wraps=LLMClient())
         self.adapter = JiraAdapter()
