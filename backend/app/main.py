@@ -12,7 +12,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.config import get_cors_origins
+from app.config import get_cors_origins, get_storage_limit
+from app.body_limit import RequestBodyLimitMiddleware
+from app.limits import CapacityError, RefinementLimitError
 from app.llm_client import create_llm_client
 from app.openai_client import LLMError, LLMTimeoutError
 from app.masking import Masker
@@ -71,7 +73,20 @@ async def lifespan(application):
             await task
 
 
+get_storage_limit("MAX_REFINEMENT_HISTORY_QUESTIONS", 40)
 app = FastAPI(lifespan=lifespan)
+
+@app.exception_handler(CapacityError)
+async def capacity_exhausted(request, error):
+    return JSONResponse(status_code=503, content={"detail": {
+        "code": "CAPACITY_EXHAUSTED", "message": "Server capacity is exhausted. Try again later."}})
+
+
+@app.exception_handler(RefinementLimitError)
+async def refinement_limit(request, error):
+    return JSONResponse(status_code=409, content={"detail": {
+        "code": "REFINEMENT_LIMIT_REACHED", "message": "Refinement limit reached. Existing session state is preserved."}})
+
 
 @app.exception_handler(RevisionConflict)
 async def revision_conflict(request, error):
@@ -132,6 +147,7 @@ async def safe_processing_errors(request, call_next):
     except Exception:
         return JSONResponse(status_code=500, content={"detail": "Processing failed"})
 
+app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),

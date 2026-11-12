@@ -1,8 +1,21 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, StringConstraints, AfterValidator
 
 from app.session_store import SESSION_ID_PATTERN
+from app.limits import CONTEXT_CHARS, PREVIEW_CHARS, FIELD_CHARS, valid_draft_size
+
+
+def validate_draft_size(draft):
+    if not valid_draft_size(draft):
+        raise ValueError("Invalid draft size")
+    return draft
+
+
+DraftSection = Literal['summary', 'business_context', 'requirements', 'acceptance_criteria', 'open_questions']
+DraftText = Annotated[str, StringConstraints(strict=True, max_length=FIELD_CHARS)]
+Draft = Annotated[dict[DraftSection, DraftText],
+                  Field(max_length=5), AfterValidator(validate_draft_size)]
 
 
 SessionId = Annotated[str, StringConstraints(
@@ -11,13 +24,13 @@ SessionId = Annotated[str, StringConstraints(
 
 
 class MaskPreviewRequest(BaseModel):
-    text: str
-    enabled_rules: list[str] | None = None
+    text: Annotated[str, StringConstraints(strict=True, max_length=CONTEXT_CHARS)]
+    enabled_rules: Annotated[list[Annotated[str, StringConstraints(strict=True, max_length=100)]], Field(max_length=20)] | None = None
 
 
 class MaskPreviewResponse(BaseModel):
     session_id: str
-    masked_text: str
+    masked_text: Annotated[str, StringConstraints(strict=True, max_length=PREVIEW_CHARS)]
 
 
 class MaskRuleResponse(BaseModel):
@@ -30,20 +43,20 @@ class MaskRuleResponse(BaseModel):
     
 class GenerateDraftRequest(BaseModel):
     session_id: SessionId
-    masked_text: str
+    masked_text: Annotated[str, StringConstraints(strict=True, max_length=PREVIEW_CHARS)]
 
 
 class TemplateReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: StrictStr
+    mode: Annotated[StrictStr, Field(max_length=100)]
     version: StrictInt
 
 
 class GenerateDraftResponse(BaseModel):
     revision: int = 1
     template: TemplateReference
-    draft: dict[str, str]
+    draft: Draft
     missing_fields: list[str]
 
 
@@ -51,7 +64,7 @@ class PreviewReviewResponse(BaseModel):
     """Generation was not attempted; review masked_text and submit again."""
 
     status: Literal["preview_review_required"] = "preview_review_required"
-    masked_text: str
+    masked_text: Annotated[str, StringConstraints(strict=True, max_length=PREVIEW_CHARS)]
 
 
 class CreateTicketRequest(BaseModel):
@@ -61,7 +74,7 @@ class CreateTicketRequest(BaseModel):
     request_id: Annotated[str, StringConstraints(strict=True, min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")] | None = None
     session_id: SessionId
     template: TemplateReference
-    draft: dict[str, str]
+    draft: Draft
 
 
 class CreateTicketResponse(BaseModel):

@@ -6,6 +6,7 @@ from app.session_store import SessionReservation, SessionStore
 from app.template_config import get_active_template
 from app.validation import InvalidDraftError, Validator
 from app.schemas import TemplateReference
+from app.limits import PREVIEW_CHARS
 from app.jira_adapter import CreatedTicket, JiraAdapter
 
 
@@ -49,6 +50,8 @@ class Orchestrator:
     ) -> tuple[str, str]:
         enabled_keys = set(enabled_rules) if enabled_rules is not None else None
         masked_text, context = self._masker.mask(text, enabled_keys)
+        if len(masked_text) > PREVIEW_CHARS:
+            raise InvalidDraftError()
         session_id = self._session_store.create(context)
         return session_id, masked_text
 
@@ -63,6 +66,8 @@ class Orchestrator:
         with self._session_store.operation(session_id, reservation=reservation) as context:
             template = get_active_template()
             model_text = self._masker.for_model({"text": masked_text}, context)["text"]
+            if len(model_text.text) > PREVIEW_CHARS:
+                raise InvalidDraftError()
             if model_text.text != masked_text:
                 review_text = model_text.text
             else:
@@ -75,6 +80,7 @@ class Orchestrator:
                 except InvalidDraftError:
                     raise ValueError("Invalid generated draft") from None
                 draft = self._masker.sanitize_fields(normalized, context)
+                draft = self._validator.normalize(draft, template)
                 missing_fields = self._validator.find_missing(draft, template)
                 from app.refinement import initialize
                 initialize(context, draft)

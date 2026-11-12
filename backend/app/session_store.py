@@ -8,6 +8,8 @@ from threading import Lock
 from typing import Callable, Iterator
 
 from app.masking import MaskingContext
+from app.config import get_storage_limit
+from app.limits import CapacityError
 
 
 SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]{22}$"
@@ -60,6 +62,7 @@ class SessionReservation:
 
 class SessionStore:
     def __init__(self, ttl_seconds: int = 900, clock: Callable[[], float] = time.monotonic):
+        self._max_sessions = get_storage_limit("MAX_ACTIVE_SESSIONS", 100)
         self._ttl_seconds = ttl_seconds
         self._clock = clock
         self._sessions: dict[str, SessionEntry] = {}
@@ -72,6 +75,9 @@ class SessionStore:
 
     def create(self, context: MaskingContext) -> str:
         with self._registry_lock:
+            self._cleanup_expired_locked()
+            if len(self._sessions) >= self._max_sessions:
+                raise CapacityError()
             while True:
                 session_id = secrets.token_urlsafe(16)
                 if session_id not in self._sessions:
@@ -169,16 +175,20 @@ class SessionStore:
 
     def cleanup_expired(self) -> int:
         """Bounded registry work only; never wait on operation locks."""
-        removed = 0
         with self._registry_lock:
-            now = self._clock()
-            for session_id, entry in list(self._sessions.items()):
-                if entry.admitted or not entry.lock.acquire(blocking=False):
-                    continue
-                try:
-                    if self._sessions.get(session_id) is entry and now >= entry.expires_at:
-                        del self._sessions[session_id]
-                        removed += 1
-                finally:
-                    entry.lock.release()
+            return self._cleanup_expired_locked()
+
+    def _cleanup_expired_locked(self) -> int:
+        # Registry lock is held; pinned/locked entries still occupy capacity.
+        removed = 0
+        now = self._clock()
+        for session_id, entry in list(self._sessions.items()):
+            if entry.admitted or not entry.lock.acquire(blocking=False):
+                continue
+            try:
+                if self._sessions.get(session_id) is entry and now >= entry.expires_at:
+                    del self._sessions[session_id]
+                    removed += 1
+            finally:
+                entry.lock.release()
         return removed

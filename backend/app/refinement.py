@@ -16,6 +16,8 @@ from app.schemas import TemplateReference
 from app.template_config import get_active_template
 from app.validation import InvalidDraftError
 from app.openai_client import LLMError
+from app.config import get_storage_limit
+from app.limits import HISTORY_CHARS, REVIEW_TOKEN_CHARS, BODY_BYTES, RefinementLimitError
 
 _REPLAY_KEY = secrets.token_bytes(32)
 logger = logging.getLogger(__name__)
@@ -34,7 +36,10 @@ def review_receipt(session_id, revision, safe):
                 history=safe['history'], proposals=safe['proposals'])
     encoded = base64.urlsafe_b64encode(json.dumps(body, ensure_ascii=False).encode()).decode()
     signature = hmac.new(_REPLAY_KEY, encoded.encode(), hashlib.sha256).hexdigest()
-    return encoded + '.' + signature
+    token = encoded + '.' + signature
+    if len(token) > REVIEW_TOKEN_CHARS:
+        raise RefinementLimitError()
+    return token
 
 
 def apply_review_receipt(token, session_id, state):
@@ -106,6 +111,19 @@ def synchronize(state, draft):
 class RefinementService:
     def __init__(self, orchestrator):
         self.o = orchestrator
+        self.max_questions = get_storage_limit('MAX_REFINEMENT_HISTORY_QUESTIONS', 40)
+
+    def check_history(self, state):
+        if (len(state['ledger']) > self.max_questions or
+                sum(len(q.get(key, '')) for q in state['ledger']
+                    for key in ('text', 'rationale', 'evidence', 'answer')) > HISTORY_CHARS):
+            raise RefinementLimitError()
+
+    def check_retained_state(self, session_id, state):
+        self.check_history(state)
+        # A retained state must always fit its signed review representation.
+        review_receipt(session_id, state['revision'],
+                       dict(history=state['ledger'], proposals=state['proposals']))
 
     def read(self, session_id, *, reservation=None):
         with self.o._session_store.operation(session_id, reservation=reservation, refresh=False) as context:
@@ -140,10 +158,25 @@ class RefinementService:
                             proposals=state['proposals'])
             safe = sanitize_refinement_content(o._masker, context, outbound)
             if safe != outbound:
+                self.check_history({'ledger': safe['history']})
+                token = review_receipt(session_id, state['revision'], safe)
+                # Include the whole retry envelope, JSON escaping and optional
+                # answers. Reject safely if a receipt cannot travel back to us.
+                retry = request.model_dump()
+                retry.update(draft=safe['draft'], review_token=token)
+                if 'answers' in retry:
+                    retry['answers'] = safe['answers']
+                if len(json.dumps(retry, ensure_ascii=True).encode()) > BODY_BYTES:
+                    raise RefinementLimitError()
                 # Raising inside operation rolls back both metadata and draft changes.
-                raise ReviewNeeded(RefinementReview(draft=safe['draft'], answers=safe['answers'],
-                    history=safe['history'], proposals=safe['proposals'],
-                    review_token=review_receipt(session_id, state['revision'], safe)))
+                try:
+                    request.__class__.model_validate(retry)
+                    review = RefinementReview(draft=safe['draft'], answers=safe['answers'],
+                        history=safe['history'], proposals=safe['proposals'], review_token=token)
+                except ValidationError:
+                    raise RefinementLimitError() from None
+                raise ReviewNeeded(review)
+            self.check_retained_state(session_id, state)
             synchronize(state, draft)
             if kind == 'analyze':
                 self.analyze(context, state)
@@ -151,7 +184,9 @@ class RefinementService:
                 self.refine(context, state, answers)
             else:
                 self.decide(state, request)
+            self.o._validator.normalize(state['draft'], template)
             state['revision'] += 1
+            self.check_retained_state(session_id, state)
             state['replay'][request.request_id] = digest
             while len(state['replay']) > 32:
                 del state['replay'][next(iter(state['replay']))]
@@ -169,6 +204,8 @@ class RefinementService:
             raise LLMError('Model request failed', category='structured_output') from None
 
     def analyze(self, context, state):
+        if len(state['ledger']) >= self.max_questions:
+            raise RefinementLimitError()
         result = self.provider_result(context, dict(draft=state['draft'], history=state['ledger']),
                                       self.o._llm_client.analyze_gaps, QuestionBatch)
         active = []
@@ -222,6 +259,7 @@ class RefinementService:
                 raise InvalidDraftError()
             # Explicit updates can revisit skips or correct an earlier disposition.
             q.update(status=answer['status'], answer=answer['answer'])
+        self.check_history(state)
         eligible = [s for s in state['draft'] if s not in state['protected_sections']]
         history = [q for q in current.values() if not q.get('superseded_by')]
         result = self.provider_result(context, dict(draft=state['draft'], questions=history,

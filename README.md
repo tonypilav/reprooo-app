@@ -408,3 +408,10 @@ VITE_API_BASE_URL=https://api.example.com npm run build
 ```
 
 Run the backend suite from the repository root using the command documented above.
+
+## Demo request and memory limits
+
+Task 7.3.1 adds a 256 KiB pre-parser HTTP body limit, bounded schemas and refinement
+history, and atomic 100-session / 100-mock-ticket capacity limits. See
+[request and memory limits](docs/REQUEST_MEMORY_LIMITS.md) for exact budgets,
+configuration, rejection contracts, receipt sizing, frontend behavior and risks.

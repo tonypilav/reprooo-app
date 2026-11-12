@@ -1,12 +1,15 @@
 """Bounded requirements-v1 clarification contracts."""
 from typing import Annotated, Literal
 from copy import deepcopy
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter
-from app.schemas import SessionId, TemplateReference
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, AfterValidator, model_validator
+from app.schemas import SessionId, TemplateReference, validate_draft_size
+from app.limits import ANSWER_CHARS, ANSWERS_CHARS, ANSWERS_COUNT, REVIEW_TOKEN_CHARS
 
 Section = Literal['summary', 'business_context', 'requirements', 'acceptance_criteria', 'open_questions']
 Status = Literal['unanswered', 'answered', 'skipped', 'not_applicable', 'left_to_implementation', 'needs_stakeholder_decision']
 Text = Annotated[str, StringConstraints(strict=True, max_length=20000)]
+AnswerText = Annotated[str, StringConstraints(strict=True, max_length=ANSWER_CHARS)]
+RefinementDraft = Annotated[dict[Section, Text], Field(max_length=5), AfterValidator(validate_draft_size)]
 Id = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=100, pattern=r'^[a-zA-Z0-9_-]+$')]
 
 class StrictModel(BaseModel):
@@ -22,7 +25,7 @@ class Question(StrictModel):
 
 class QuestionState(Question):
     status: Status = 'unanswered'
-    answer: Text = ''
+    answer: AnswerText = ''
     superseded_by: Id | None = None
 
 class QuestionBatch(StrictModel):
@@ -45,21 +48,27 @@ class Proposal(ProposedChange):
 class Answer(StrictModel):
     question_id: Id
     status: Status
-    answer: Text = ''
+    answer: AnswerText = ''
 
 class Mutation(StrictModel):
     session_id: SessionId
     template: TemplateReference
     expected_revision: Annotated[int, Field(ge=1)]
     request_id: Id
-    draft: dict[Section, Text]
-    review_token: Annotated[str, StringConstraints(strict=True, max_length=2000000)] | None = None
+    draft: RefinementDraft
+    review_token: Annotated[str, StringConstraints(strict=True, max_length=REVIEW_TOKEN_CHARS)] | None = None
 
 class AnalyzeRequest(Mutation):
     pass
 
 class RefineRequest(Mutation):
-    answers: Annotated[list[Answer], Field(max_length=100)] = []
+    answers: Annotated[list[Answer], Field(max_length=ANSWERS_COUNT)] = []
+
+    @model_validator(mode='after')
+    def bounded_answers(self):
+        if sum(len(answer.answer) for answer in self.answers) > ANSWERS_CHARS:
+            raise ValueError('Invalid answers size')
+        return self
 
 class Decision(StrictModel):
     proposal_id: Id
@@ -72,7 +81,7 @@ class DecisionsRequest(Mutation):
 
 class Checkpoint(StrictModel):
     template: TemplateReference
-    draft: dict[Section, Text]
+    draft: RefinementDraft
     revision: int
     missing_fields: list[Section]
     questions: list[QuestionState]
@@ -87,11 +96,11 @@ class Checkpoint(StrictModel):
 
 class RefinementReview(StrictModel):
     status: Literal['preview_review_required'] = 'preview_review_required'
-    draft: dict[Section, Text]
+    draft: RefinementDraft
     answers: list[Answer] = []
     history: list[QuestionState] = []
     proposals: list[Proposal] = []
-    review_token: str | None = None
+    review_token: Annotated[str, StringConstraints(strict=True, max_length=REVIEW_TOKEN_CHARS)] | None = None
 
 
 def sanitize_refinement_content(masker, context, value):
@@ -110,7 +119,7 @@ def sanitize_refinement_content(masker, context, value):
 
     for key, node in result.items():
         if key == 'draft':
-            TypeAdapter(dict[Section, Text]).validate_python(node, strict=True)
+            TypeAdapter(RefinementDraft).validate_python(node, strict=True)
             content(node, node, (key,))
         elif key in ('eligible_sections', 'protected_sections'):
             TypeAdapter(list[Section]).validate_python(node, strict=True)

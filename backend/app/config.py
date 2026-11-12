@@ -19,6 +19,17 @@ def validate_llm_config():
         raise ValueError("OPENAI_API_KEY is required for openai mode")
 
 
+def get_storage_limit(name, default):
+    """Allow smaller demo budgets; never exceed the reviewed safe ceiling."""
+    try:
+        value = int(os.getenv(name, str(default)))
+        if not 1 <= value <= default:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ValueError(f"{name} must be an integer between 1 and {default}") from None
+    return value
+
+
 def get_cors_origins():
     """Validate before application initialization; never echo environment values."""
     environment = os.getenv("APP_ENV", "development").strip()

@@ -1,9 +1,10 @@
 import json
 
 from app.refinement_schemas import QuestionBatch, ProposalBatch
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.template_config import Template
+from app.schemas import DraftText, validate_draft_size
 from app.masking import SanitizedText, require_sanitized
 
 
@@ -47,11 +48,16 @@ class LLMClient:
 class RequirementsOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    summary: StrictStr
-    business_context: StrictStr
-    requirements: StrictStr
-    acceptance_criteria: StrictStr
-    open_questions: StrictStr
+    summary: DraftText
+    business_context: DraftText
+    requirements: DraftText
+    acceptance_criteria: DraftText
+    open_questions: DraftText
+
+    @model_validator(mode='after')
+    def bounded_draft(self):
+        validate_draft_size(self.model_dump())
+        return self
 
 
 GENERATION_INSTRUCTIONS = """Restructure the supplied task context into requirements v1.
