@@ -1,4 +1,5 @@
 """Deterministic single-process session lifecycle tests; synthetic input only."""
+from protection_fixture import isolate_protection
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Lock
@@ -57,6 +58,7 @@ def draft():
 
 class SessionTests(unittest.TestCase):
     def setUp(self):
+        isolate_protection(self)
         self.clock = FakeClock()
         self.store = SessionStore(clock=self.clock)
         self.sid = self.store.create(Masker().context())
@@ -164,6 +166,7 @@ class SessionTests(unittest.TestCase):
 
 class OrchestratorFixture:
     def setUp(self):
+        isolate_protection(self)
         self.clock = FakeClock()
         self.store = SessionStore(clock=self.clock)
         self.client = Mock(wraps=LLMClient())
@@ -239,6 +242,7 @@ class OrchestratorTests(OrchestratorFixture, unittest.TestCase):
 
 class ConcurrencyTests(OrchestratorFixture, unittest.TestCase):
     def setUp(self):
+        isolate_protection(self)
         super().setUp()
         self.lock = ObservedLock()
         self.store._sessions[self.sid].lock = self.lock
@@ -392,6 +396,7 @@ class ConcurrencyTests(OrchestratorFixture, unittest.TestCase):
 
 class SessionAPITests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        isolate_protection(self)
         self.clock = FakeClock()
         self.store = SessionStore(clock=self.clock)
         self.jira = Mock(wraps=JiraAdapter())

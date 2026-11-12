@@ -24,6 +24,15 @@ async function sessionResponse(response) {
       error.code = code;
     }
     if (response.status === 409 && code === "REVISION_CONFLICT") error.code = code;
+    const expected = { RATE_LIMITED: 429, LLM_CAPACITY_EXHAUSTED: 503,
+      OPERATION_CAPACITY_EXHAUSTED: 503, RATE_LIMIT_CAPACITY_EXHAUSTED: 503,
+      DEMO_BUDGET_EXHAUSTED: 503, CAPACITY_EXHAUSTED: 503,
+      SESSION_LLM_LIMIT_REACHED: 409, MASKING_LIMIT_REACHED: 409,
+      LLM_INPUT_LIMIT_REACHED: 409, REFINEMENT_LIMIT_REACHED: 409,
+      REQUEST_TOO_LARGE: 413 };
+    if (expected[code] === response.status) error.code = code;
+    const seconds = Number(response.headers?.get('Retry-After'));
+    if (Number.isInteger(seconds) && seconds > 0 && seconds <= 60) error.retryAfter = seconds;
     throw error;
   }
   return response.json();
@@ -51,10 +60,7 @@ export async function maskPreview(text, enabledRules) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, enabled_rules: enabledRules }),
   });
-  if (!response.ok) {
-    throw new Error("Запрос завершился ошибкой");
-  }
-  return response.json();
+  return sessionResponse(response);
 }
 
 export async function generateDraft(sessionId, maskedText) {
@@ -110,4 +116,23 @@ export async function clarificationOperation(kind, payload) {
 export async function getRefinement(sessionId) {
   requireSession(sessionId);
   return sessionResponse(await fetch(`${API_URL}/api/sessions/${encodeURIComponent(sessionId)}/refinement`));
+}
+
+export function resourceErrorMessage(error) {
+  if (error?.code === 'RATE_LIMITED') return error.retryAfter
+    ? `Слишком много запросов. Повторите через ${error.retryAfter} сек.`
+    : 'Слишком много запросов. Повторите через минуту.';
+  const messages = {
+    LLM_CAPACITY_EXHAUSTED: 'AI занят. Ваши правки сохранены. Повторите чуть позже.',
+    OPERATION_CAPACITY_EXHAUSTED: 'Сервер занят. Повторите чуть позже.',
+    RATE_LIMIT_CAPACITY_EXHAUSTED: 'Сервер занят. Повторите через минуту.',
+    DEMO_BUDGET_EXHAUSTED: 'Лимит AI для демо исчерпан. Можно продолжить просмотр и экспорт.',
+    SESSION_LLM_LIMIT_REACHED: 'Лимит AI этой сессии исчерпан. Можно продолжить просмотр и экспорт.',
+    CAPACITY_EXHAUSTED: 'Хранилище сервера заполнено. Повторите позже.',
+    MASKING_LIMIT_REACHED: 'Достигнут лимит маскирования. Состояние сессии сохранено.',
+    REFINEMENT_LIMIT_REACHED: 'Достигнут лимит уточнений. Текущий черновик сохранён.',
+    LLM_INPUT_LIMIT_REACHED: 'Слишком большой объём данных для AI. Сократите текст.',
+    REQUEST_TOO_LARGE: 'Слишком большой запрос. Сократите текст.',
+  };
+  return messages[error?.code];
 }

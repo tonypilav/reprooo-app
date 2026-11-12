@@ -1,4 +1,5 @@
 """Synthetic-only security regression tests. No credentials or external calls."""
+from protection_fixture import isolate_protection
 import importlib
 import sys
 import unittest
@@ -39,6 +40,7 @@ def complete_draft():
 
 class MaskingTests(unittest.TestCase):
     def setUp(self):
+        isolate_protection(self)
         self.masker = Masker()
 
     def test_supported_password_assignments(self):
@@ -264,6 +266,9 @@ class BoundaryTests(unittest.TestCase):
 
 
 class ConnectorTests(unittest.TestCase):
+    def setUp(self):
+        isolate_protection(self)
+
     @classmethod
     def setUpClass(cls):
         # Do not import real app.config: that module loads local dotenv values.
@@ -307,6 +312,7 @@ class ConnectorTests(unittest.TestCase):
 
 class APITests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        isolate_protection(self)
         self.orchestrator = make_orchestrator()
         self.override = patch("app.main.orchestrator", self.orchestrator)
         self.override.start()

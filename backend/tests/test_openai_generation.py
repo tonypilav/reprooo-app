@@ -1,4 +1,5 @@
 """Task 4: synthetic fixtures and mocked SDK only; never make network requests."""
+from protection_fixture import isolate_protection
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -29,6 +30,9 @@ def response(value=None, status="completed", output=None):
 
 
 class ProviderTests(unittest.TestCase):
+    def setUp(self):
+        isolate_protection(self)
+
     def test_selection_and_configuration(self):
         with patch.object(config, "LLM_PROVIDER", "stub"), patch.object(config, "OPENAI_API_KEY", "synthetic-key"):
             self.assertIsInstance(create_llm_client(), LLMClient)
@@ -49,7 +53,7 @@ class ProviderTests(unittest.TestCase):
             namespace = {}
             exec(Path(config.__file__).read_text(), namespace)
         self.assertEqual(namespace["LLM_PROVIDER"], "stub")
-        self.assertEqual(namespace["OPENAI_MODEL"], "gpt-5.4-mini")
+        self.assertEqual(namespace["OPENAI_MODEL"], "gpt-5.4-mini-2026-03-17")
 
     def test_invalid_config_prevents_application_initialization(self):
         from pathlib import Path
@@ -72,6 +76,7 @@ class ProviderTests(unittest.TestCase):
 
 class ConnectorTests(unittest.TestCase):
     def setUp(self):
+        isolate_protection(self)
         self.client = OpenAIClient()
         self.client._client = Mock()
         self.client._client.responses.parse.return_value = response()
@@ -117,6 +122,7 @@ class ConnectorTests(unittest.TestCase):
 
 class GenerationTests(unittest.TestCase):
     def setUp(self):
+        isolate_protection(self)
         self.clock = FakeClock()
         self.store = SessionStore(clock=self.clock)
         self.generator = OpenAIRequirementsGenerator()
@@ -176,6 +182,9 @@ class GenerationTests(unittest.TestCase):
 
 
 class ErrorAPITests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        isolate_protection(self)
+
     async def test_safe_error_codes(self):
         generator = OpenAIRequirementsGenerator()
         generator._client._client = Mock()

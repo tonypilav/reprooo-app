@@ -94,16 +94,17 @@ changes or frontend changes are required.
 | 503 | `CAPACITY_EXHAUSTED` | Session or ticket storage full; existing state preserved. |
 | 409 | `REFINEMENT_LIMIT_REACHED` | History or review representation cannot fit; existing state preserved. |
 
-The three new codes use the existing `detail: {code, message}` envelope. Current
-frontend code uses its generic failure path and preserves content/session state.
+The three Task 7.3.1 codes use the existing `detail: {code, message}` envelope.
+Frontend handling preserves content/session state.
 A submission failure invalidates the local final snapshot through existing
-behavior; prepare again before retrying. Dedicated capacity/size/history messages
-require a separate frontend UX change. Existing session, revision-conflict, LLM
+behavior; prepare again before retrying. Task 7.3.2 adds dedicated Russian
+capacity/size/history messages and retry guidance. Existing session, revision-conflict, LLM
 and incomplete-draft contracts remain unchanged.
 
 The target MVP describes user-controlled iteration without a forced round count.
-This demo imposes a retained-history budget, not a fixed round count. Refinement of
-existing questions can continue within the budgets. Including many unresolved
+Task 7.3.1 imposes a retained-history budget. Task 7.3.2 additionally limits paid
+dispatches to twelve per session. Refinement of existing questions can continue
+within these demo budgets. Including many unresolved
 questions during finalization can exceed a draft budget and require manual editing.
 
 ## Verification and remaining risks
@@ -120,9 +121,9 @@ concurrent creation at 99/100 sessions, concurrent cleanup with pinned expired
 work, sliding TTL, history/receipt rollback and replay, Jira capacity and single-use
 retries. Existing tests exercise the complete MVP path offline.
 
-These bounds do not cap simultaneous requests, model calls or total spend. Existing
-issued-placeholder metadata can grow across repeated successful sanitization within
-a sliding-TTL session; this task leaves its retention policy unchanged. Server
+Task 7.3.2 supplements these bounds with [abuse protection](ABUSE_PROTECTION.md):
+bounded request admission, paid-call concurrency, rate limits, per-session paid-call
+quotas, a per-process conservative budget, and a 2,000-entry placeholder limit. Server
 buffering, slow clients and provider response buffering remain outside these
 application limits. All retained state is process-local and lost on restart.
 

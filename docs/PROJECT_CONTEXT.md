@@ -176,6 +176,12 @@ These findings describe the historical prototype, not the current implementation
   export, snapshot-based mock submission, and a clean reset. Required sections and
   pending local clarification input gate preparation; unresolved questions and
   unaccepted proposals do not. Any subsequent edit invalidates the snapshot.
+- Task 7.3.2 adds demo-only abuse protection: request throttling, two concurrent
+  OpenAI calls, twelve paid dispatches per session, bounded placeholder metadata,
+  output limits, safe logging and a conservative $4 in-memory reservation budget
+  per process lifetime. This qualifies the target's unrestricted iteration count.
+  Restart resets the allowance; total demo spend is not guaranteed. See
+  `ABUSE_PROTECTION.md` for proxy verification and production startup requirements.
 - Per-section approvals, persistent history and real Jira integration remain out
   of scope. The offline stub remains intentionally non-semantic.
 

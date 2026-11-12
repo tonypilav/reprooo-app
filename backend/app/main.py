@@ -1,3 +1,7 @@
+import os
+from threading import Lock
+from app.abuse_protection import (AbuseMiddleware, ProtectionError, protection, protection_response, trusted_networks)
+from app.safe_logging import configure_safe_logging
 import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
@@ -74,7 +78,13 @@ async def lifespan(application):
 
 
 get_storage_limit("MAX_REFINEMENT_HISTORY_QUESTIONS", 40)
+trusted_networks(os.getenv("FORWARDED_ALLOW_IPS", ""))
+configure_safe_logging()
 app = FastAPI(lifespan=lifespan)
+
+@app.exception_handler(ProtectionError)
+async def protection_error(request, error):
+    return protection_response(error)
 
 @app.exception_handler(CapacityError)
 async def capacity_exhausted(request, error):
@@ -145,14 +155,17 @@ async def safe_processing_errors(request, call_next):
     try:
         return await call_next(request)
     except Exception:
+        logger.warning("Request processing failed")
         return JSONResponse(status_code=500, content={"detail": "Processing failed"})
 
+app.add_middleware(AbuseMiddleware, networks=trusted_networks(os.getenv("TRUSTED_PROXY_CIDRS", "")))
 app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After"],
 )
 orchestrator = Orchestrator(Masker(), session_store, create_llm_client(), Validator(), JiraAdapter())
 
@@ -160,15 +173,34 @@ orchestrator = Orchestrator(Masker(), session_store, create_llm_client(), Valida
 async def run_session_operation(function, session_id, *args):
     # This async step runs after request validation, before worker scheduling.
     # It never waits on the per-session operation lock on the event loop.
-    reservation = orchestrator.admit_session(session_id)
+    capacity = protection.operation()
+    capacity.__enter__()
+    ownership = Lock()
+    state = ['pending']
     try:
-        return await to_thread.run_sync(
-            partial(function, session_id, *args, reservation=reservation),
-            abandon_on_cancel=True,
-        )
+        reservation = orchestrator.admit_session(session_id)
+    except BaseException:
+        capacity.__exit__(None, None, None)
+        raise
+
+    def worker():
+        with ownership:
+            if state[0] != 'pending':
+                return
+            state[0] = 'running'
+        try:
+            return function(session_id, *args, reservation=reservation)
+        finally:
+            with ownership:
+                state[0] = 'released'
+                capacity.__exit__(None, None, None)
+    try:
+        return await to_thread.run_sync(worker, abandon_on_cancel=True)
     finally:
-        # If no worker claimed it, cancel unused admission. Otherwise the worker
-        # alone releases it in operation.finally, even if this await is cancelled.
+        with ownership:
+            if state[0] == 'pending':
+                state[0] = 'released'
+                capacity.__exit__(None, None, None)
         reservation.cancel()
 
 

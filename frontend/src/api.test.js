@@ -951,3 +951,39 @@ test('export toolbar and mock submission use localized accessible controls', asy
   const reset = nodes(tree).find((n) => n.props.className === 'reset-action');
   assert.equal(find(reset, 'Button', t.editor.reset).props.variant, 'subtle');
 });
+
+for (const [status, code] of [[429, 'RATE_LIMITED'], [503, 'LLM_CAPACITY_EXHAUSTED'],
+  [503, 'DEMO_BUDGET_EXHAUSTED'], [503, 'CAPACITY_EXHAUSTED'],
+  [409, 'REFINEMENT_LIMIT_REACHED'], [409, 'MASKING_LIMIT_REACHED'],
+  [409, 'SESSION_LLM_LIMIT_REACHED'], [409, 'LLM_INPUT_LIMIT_REACHED'],
+  [503, 'OPERATION_CAPACITY_EXHAUSTED'], [503, 'RATE_LIMIT_CAPACITY_EXHAUSTED'],
+  [413, 'REQUEST_TOO_LARGE']]) {
+  test(`safe resource message for ${code}`, async () => {
+    mock.method(globalThis, 'fetch', async () => ({ ...response(status, { detail: { code,
+      message: 'token=synthetic-canary' } }), headers: { get: () => '12' } }));
+    for (const invoke of [() => api.maskPreview('Synthetic', []), () => api.generateDraft(sid, 'Synthetic'),
+      () => api.clarificationOperation('analyze', { session_id: sid })]) {
+      await assert.rejects(invoke(), (error) => {
+        assert.equal(error.code, code);
+        assert.equal(error.retryAfter, 12);
+        assert.ok(api.resourceErrorMessage(error));
+        assert.ok(!api.resourceErrorMessage(error).includes('synthetic-canary'));
+        return true;
+      });
+    }
+  });
+}
+
+test('resource errors validate status and bound retry guidance without automatic retries', async () => {
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    return { ...response(500, { detail: { code: 'RATE_LIMITED' } }), headers: { get: () => '999999999' } };
+  });
+  await assert.rejects(api.generateDraft(sid, 'Synthetic'), (error) => {
+    assert.equal(error.code, undefined);
+    assert.equal(error.retryAfter, undefined);
+    return true;
+  });
+  assert.equal(calls, 1);
+});

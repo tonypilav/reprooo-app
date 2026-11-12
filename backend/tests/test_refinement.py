@@ -1,4 +1,5 @@
 """Synthetic Task 5 checks; no live provider requests."""
+from protection_fixture import isolate_protection
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -24,6 +25,7 @@ from test_sessions import FakeClock, reference
 
 class RefinementTests(unittest.TestCase):
     def setUp(self):
+        isolate_protection(self)
         self.clock = FakeClock()
         self.store = SessionStore(clock=self.clock)
         self.llm = LLMClient()
@@ -588,6 +590,7 @@ class DefaultMaskingRefinementAPITests(unittest.IsolatedAsyncioTestCase):
     """Exercise real SDK parsing over mock HTTP, with every default mask enabled."""
 
     async def asyncSetUp(self):
+        isolate_protection(self)
         self.o = Orchestrator(Masker(), SessionStore(), LLMClient(), Validator(), JiraAdapter())
         self.main_patch = patch.object(main, 'orchestrator', self.o)
         self.main_patch.start()

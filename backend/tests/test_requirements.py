@@ -1,4 +1,5 @@
 """Requirements-v1 contracts; synthetic data only, no external integrations."""
+from protection_fixture import isolate_protection
 import unittest
 from unittest.mock import Mock, patch
 
@@ -24,6 +25,7 @@ SAFE_INVALID = {"detail": {"code": "INVALID_REQUEST", "message": "Invalid reques
 
 class TemplateAndValidationTests(unittest.TestCase):
     def setUp(self):
+        isolate_protection(self)
         self.template = get_active_template()
         self.validator = Validator()
 
@@ -96,6 +98,7 @@ class TemplateAndValidationTests(unittest.TestCase):
 
 class GeneratorAndJiraTests(unittest.TestCase):
     def setUp(self):
+        isolate_protection(self)
         self.template = get_active_template()
 
     def test_stub_literal_mapping_and_no_invented_content(self):
@@ -172,6 +175,7 @@ class GeneratorAndJiraTests(unittest.TestCase):
 
 class RequirementsAPITests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        isolate_protection(self)
         self.clock = FakeClock()
         self.store = SessionStore(clock=self.clock)
         self.jira = Mock(wraps=JiraAdapter())
