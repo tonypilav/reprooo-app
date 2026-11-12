@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Select,
   Alert,
@@ -34,6 +34,8 @@ function DraftEditor({ template, initialDraft, initialRevision = 1, sessionId, o
   const [inclusion, setInclusion] = useState(null);
   const [notice, setNotice] = useState(null);
   const [everPrepared, setEverPrepared] = useState(false);
+  const copyTimer = useRef(null);
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
   const editVersion = useRef(0);
   const busy = useRef(false);
   const finalRef = useRef(null);
@@ -167,8 +169,20 @@ function DraftEditor({ template, initialDraft, initialRevision = 1, sessionId, o
 
   async function handleCopy(format) {
     if (!finalRef.current || disabled) return;
-    try { await copyFinal(finalRef.current, format); setNotice(finalNotification('copied')); }
-    catch { setNotice(finalNotification('copyFailed')); }
+    try {
+      await copyFinal(finalRef.current, format);
+      clearTimeout(copyTimer.current);
+      const confirmation = finalNotification('copied');
+      setNotice(confirmation);
+      copyTimer.current = setTimeout(() => {
+        setNotice((current) => current === confirmation ? null : current);
+        copyTimer.current = null;
+      }, 2000);
+    } catch {
+      clearTimeout(copyTimer.current);
+      copyTimer.current = null;
+      setNotice(finalNotification('copyFailed'));
+    }
   }
 
   function handleDownload() {
@@ -266,12 +280,12 @@ function DraftEditor({ template, initialDraft, initialRevision = 1, sessionId, o
             onChange={(event) => updateAnswer(q, { answer: event.currentTarget.value, status: 'answered' })} />
         </Stack></Paper>;
       })}
-      {Object.keys(answers).length > 0 && <Alert color="yellow">
-        {f.pending}
+      {Object.keys(answers).length > 0 && <Stack gap="sm" className="editor-analysis-actions">
+        <Alert color="yellow">{f.pending}</Alert>
         <Button variant="default" disabled={disabled} onClick={() => {
           invalidate(); answerVersion.current += 1; setAnswers({});
         }}>{f.discard}</Button>
-      </Alert>}
+      </Stack>}
       {checkpoint && <Button disabled={disabled} onClick={() => operate('refine', { answers: Object.values(answers) })}>{c.refine}</Button>}
       {checkpoint?.protected_sections.map((section) => <Group key={section}>
         <Text>{label(section)}: {c.protected}</Text>

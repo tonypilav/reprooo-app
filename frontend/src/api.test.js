@@ -74,6 +74,7 @@ async function mount(filename) {
   const states = [];
   const effects = [];
   const pending = [];
+  const cleanups = [];
   const createElement = (type, props, ...children) => ({ type, props: props || {}, children });
   const deps = {
     ...api, ...refinementState, ...finalization, t, createElement,
@@ -109,7 +110,8 @@ async function mount(filename) {
   const Component = new Function(...Object.keys(deps), factoryCode)(...Object.values(deps));
   return {
     render(props = {}) { cursor = 0; const tree = Component(props); mounted = true; return tree; },
-    async effects() { for (const effect of effects.splice(0)) effect(); await Promise.all(pending); },
+    unmount() { for (const cleanup of cleanups.splice(0)) cleanup(); },
+    async effects() { for (const effect of effects.splice(0)) { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); } await Promise.all(pending); },
   };
 }
 function nodes(tree) {
@@ -986,4 +988,47 @@ test('resource errors validate status and bound retry guidance without automatic
     return true;
   });
   assert.equal(calls, 1);
+});
+
+
+test('copy confirmation expires after two seconds, restarts, and cleans up on unmount', async (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {
+    clipboard: { writeText: async () => {} },
+  } });
+  try {
+    const { editor, props } = await preparedEditor();
+    await editor.effects();
+    const copy = async (label) => find(editor.render(props), 'Button', label).props.onClick();
+    const success = () => nodes(editor.render(props)).some((n) => n.children.includes(t.finalization.copied));
+    await copy(t.finalization.copySummary);
+    context.mock.timers.tick(1999);
+    assert.equal(success(), true);
+    await copy(t.finalization.copyDescription);
+    context.mock.timers.tick(1);
+    assert.equal(success(), true);
+    context.mock.timers.tick(1998);
+    assert.equal(success(), true);
+    context.mock.timers.tick(1);
+    assert.equal(success(), false);
+    await copy(t.finalization.copySummary);
+    editor.unmount();
+    context.mock.timers.tick(2000);
+    // A cleared timer cannot update component state after unmount.
+    assert.equal(success(), true);
+  } finally { delete globalThis.navigator; }
+});
+
+test('pending warning and wrapping discard action are separate stacked elements', async () => {
+  const { editor, props } = await preparedEditor(pendingInputCheckpoint());
+  change(find(editor.render(props), 'Textarea', t.clarification.answer), 'Pending answer');
+  const tree = editor.render(props);
+  const alert = find(tree, 'Alert', t.finalization.pending);
+  const button = find(tree, 'Button', t.finalization.discard);
+  assert.equal(nodes(alert).includes(button), false);
+  const stack = nodes(tree).find((n) => n.type === 'Stack' && n.children.includes(alert) && n.children.includes(button));
+  assert.ok(stack);
+  assert.equal(stack.props.gap, 'sm');
+  assert.equal(stack.props.className, 'editor-analysis-actions');
+  assert.ok(stack.children.indexOf(alert) < stack.children.indexOf(button));
 });
