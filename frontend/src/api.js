@@ -1,4 +1,6 @@
-const API_URL = "http://localhost:8000";
+import { resolveApiBaseUrl } from './apiConfig.js';
+
+const API_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_BASE_URL, import.meta.env?.PROD);
 
 export function isSessionUnavailable(error) {
   return error?.code === "SESSION_UNAVAILABLE";

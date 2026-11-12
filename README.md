@@ -364,3 +364,47 @@ A template's version identifies its structure, not a draft revision.
 The editor verifies the loaded template against the generated reference. If loading
 fails or metadata differs, the generated draft remains in local React state for
 an explicit retry. No replacement session or draft is created automatically.
+
+## Production connectivity (Task 7.2)
+
+Local development needs no new configuration: the frontend uses
+`http://localhost:8000` and the backend allows `http://localhost:5173`.
+Example files list variable names only; fill their blank values before use rather
+than copying them unchanged.
+
+On **Vercel**, set `VITE_API_BASE_URL=https://api.example.com` before building.
+It must be an explicit HTTPS backend URL; missing or invalid values fail the build.
+Trailing slashes are removed; an optional base path is supported. URLs containing
+credentials, query strings, or fragments are rejected. Rebuild after changing it.
+Custom Vite build modes require this setting too.
+
+On **Render**, set `APP_ENV=production` and
+`CORS_ALLOWED_ORIGINS=https://demo.example.com`.
+Multiple exact origins can be comma-separated. Production requires HTTPS origins;
+missing, blank, malformed, wildcard, or localhost production values fail application
+initialization. Origins cannot contain paths or trailing slashes. Explicit configuration
+replaces the local default; include local origins only in development configuration
+when needed. No Vercel preview domains are allowed automatically. Credentials remain
+disabled, with existing allowed methods and headers unchanged.
+
+`APP_ENV` defaults to `development` and only accepts `development` or `production`.
+`CORS_ALLOWED_ORIGINS` defaults to the local Vite origin only when unset in development.
+Set production mode explicitly on Render; it is not inferred from the hosting service.
+
+OpenAI API keys belong only in backend environment settings. **Never put keys or other
+secrets in `VITE_*` variables**: Vite embeds these values in public browser assets.
+The public API URL is not a secret. CORS controls browser access, not authentication
+or abuse prevention. Public API protection and resource limits remain required before
+deployment. This task adds no deployment files or live integrations.
+
+Connectivity verification (synthetic data, no live OpenAI calls):
+
+```sh
+cd frontend
+node --test src/*.test.js
+npm run lint
+VITE_API_BASE_URL=https://api.example.com npm run build
+# Without VITE_API_BASE_URL, a build is expected to fail.
+```
+
+Run the backend suite from the repository root using the command documented above.

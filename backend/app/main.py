@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.config import get_cors_origins
 from app.llm_client import create_llm_client
 from app.openai_client import LLMError, LLMTimeoutError
 from app.masking import Masker
@@ -133,7 +134,7 @@ async def safe_processing_errors(request, call_next):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=get_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
