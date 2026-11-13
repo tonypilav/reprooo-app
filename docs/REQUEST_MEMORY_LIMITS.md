@@ -1,6 +1,11 @@
 # Request and memory limits — Task 7.3.1
 
-These limits cover the single-process, anonymous hackathon demo. They do not add
+This document primarily records the resource limits implemented in Task 7.3.1.
+Task 7.3.2 added [abuse protection](ABUSE_PROTECTION.md); current protection also
+includes throttling, concurrency controls, dispatch quotas, and process-local
+budget reservations.
+
+These Task 7.3.1 limits cover the single-process, anonymous hackathon demo. They do not add
 rate limiting, model concurrency controls, authentication, or persistent storage.
 Text budgets count Python Unicode characters; the HTTP budget counts received
 bytes. JSON escaping and multibyte UTF-8 can make the HTTP budget more restrictive.

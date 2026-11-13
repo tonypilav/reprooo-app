@@ -106,6 +106,8 @@ Suggested implementation contract:
 
 The exact patch schema and approval UX should be proposed after inspecting the current code, not assumed to exist already.
 
+**Completion note:** The preceding contract and planning instruction record the original design intent. Task 5 implemented canonical draft revisions and targeted section proposals with individual accept/reject decisions; the current demo also has retained-state and paid-call limits described in section 9.
+
 ## 7. Sensitive data and documentation
 
 - Preserve the existing configurable masking chips and user-facing preview.
@@ -120,6 +122,8 @@ The exact patch schema and approval UX should be proposed after inspecting the c
 **MVP scope decision:** Support for uploading a specification is desirable but not required for the core end-to-end demo. Do not implement a full database, document retrieval system, or automated source-code ingestion unless explicitly prioritized later. Team/service chips may initially be static UI metadata or deferred.
 
 ## 8. Architecture and implementation constraints
+
+**Completion note:** The implementation actions below are retained as original planning guidance. Tasks 3 and 4 completed the requirements-v1 template and OpenAI integration; Task 5 added separate gap analysis and refinement. See section 9 for the current implementation snapshot.
 
 Keep the existing modular architecture and current UI style as much as possible:
 
@@ -149,7 +153,7 @@ The earlier audit reported:
 
 These findings describe the historical prototype, not the current implementation.
 
-### Current implementation after Tasks 1–5
+### Current implementation after Tasks 1–6 and 7.3.2
 
 - Task 1 added irreversible supported-secret redaction, edited-preview rechecking,
   safe processing/output boundaries, and synthetic regression tests. No original
@@ -182,12 +186,16 @@ These findings describe the historical prototype, not the current implementation
   per process lifetime. This qualifies the target's unrestricted iteration count.
   Restart resets the allowance; total demo spend is not guaranteed. See
   `ABUSE_PROTECTION.md` for proxy verification and production startup requirements.
-- Per-section approvals, persistent history and real Jira integration remain out
-  of scope. The offline stub remains intentionally non-semantic.
+- A formal section-level approval workflow, separate from individual acceptance
+  or rejection of AI-generated section proposals already supported by Task 5,
+  remains out of scope, as do persistent history and real Jira integration.
+  The offline stub remains intentionally non-semantic.
 
-The rest of this document continues to define the target MVP. Current structural
-checks and free-text Open Questions do not implement the future analysis/question
-state model. Verify source code and tests before making implementation claims.
+The rest of this document continues to define the target MVP. Separate gap analysis,
+question dispositions, and targeted refinement proposals are implemented. These are
+distinct from semantic readiness scoring, which remains unimplemented; required-field
+checks validate structure, and the user decides whether to finalize. Verify source
+code and tests before making implementation claims.
 
 ## 10. MVP priorities
 
