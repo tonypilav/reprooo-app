@@ -1,426 +1,128 @@
 # Reprooo
 
-**AI-powered requirements refinement — from raw context to development-ready Jira tickets.**
+**Turn incomplete task descriptions into structured requirements—with AI suggestions and human decisions.**
 
-Reprooo is a web application that transforms unstructured business requests, discussions, and technical context into clear, structured, and testable requirements.
+Reprooo is a hackathon MVP for PMs, analysts, QA engineers, and developers who need a shared understanding of a task before implementation and testing. It helps organize context, identify gaps, and refine a draft through explicit review.
 
-Instead of simply rewriting task descriptions, Reprooo identifies missing information, ambiguities, contradictions, and potential edge cases before they become blockers during development or QA.
-
-The goal is to improve task readiness, reduce clarification cycles, and enable QA engineers to participate earlier in the development lifecycle.
+[Try the public demo](https://reprooo-app.vercel.app/) using synthetic data only.
 
 ## The Problem
 
-Software development teams frequently receive tasks with incomplete or ambiguous requirements.
-
-Critical details — such as expected behavior, access permissions, error handling, dependencies, and acceptance criteria — are often discovered only after development has started or when a task reaches testing.
-
-This results in additional discussions, rework, delayed testing, and inconsistent expectations between business stakeholders, developers, and QA engineers.
-
-Reprooo addresses this problem by introducing an AI-assisted requirements refinement process before or during the early stages of development.
+Incomplete task descriptions leave expected behavior, constraints, and acceptance criteria open to interpretation. Teams discover missing details during development or testing, leading to repeated clarifications, rework, and delays. Reprooo brings those questions into requirements review.
 
 ## How It Works
 
-The target workflow consists of six stages:
+1. **Enter task context.** Paste a request, discussion, or other task description.
+2. **Review masked data.** Choose optional masking categories, inspect the preview, and edit it if needed. The backend checks edited content again before model requests.
+3. **Generate structured requirements.** Create a draft with Summary, Business Context, Requirements, Acceptance Criteria, and Open Questions.
+4. **Run gap analysis separately.** An explicit action analyzes the current draft and returns up to five clarification questions, prioritized as blocking, recommended, or optional. Initial generation does not run this analysis automatically.
+5. **Answer clarification questions.** Provide answers or mark questions as skipped, not applicable, delegated to implementation, or needing a stakeholder decision.
+6. **Review proposed changes by section.** Inspect each proposed replacement and accept or reject it individually. AI suggestions do not change the canonical draft until accepted; manual editing is also available.
+7. **Finalize and export.** Review the prepared snapshot, copy its summary or description, download Markdown, or submit to **Mock Jira**. After mock submission, review the result and reset to start again.
 
-1. **Provide context.** The user enters an initial business request, task description, or discussion copied from Slack. Supporting technical documentation may be attached where supported.
-2. **Mask sensitive information.** The application detects and masks configured categories of sensitive data. The user reviews the masked content before AI processing. Credentials and secrets must never be restored into generated tickets.
-3. **Generate an initial draft.** An LLM analyzes the context and produces a structured Jira task, highlighting missing requirements, ambiguities, contradictions, and potential edge cases.
-4. **Refine requirements iteratively.** The user answers clarification questions, edits the draft, and requests another analysis. Each iteration updates only relevant sections while preserving previously approved requirements.
-5. **Finalize the task.** The user reviews the resulting requirements, acceptance criteria, and unresolved questions before deciding whether the task is ready.
-6. **Create a Jira ticket.** The finalized task is submitted through a Jira adapter. The hackathon MVP uses a mock implementation; real Jira Cloud integration is planned for future development.
+Summary, Business Context, and Acceptance Criteria must be nonempty for final preparation. Unresolved questions do not block finalization; you explicitly choose whether to include them in the final text. Field validation checks structure, while the user decides whether the requirements are ready.
 
-The user controls the number of refinement iterations and makes the final decision about task readiness.
+## Key Features
 
-## Key Capabilities (Target Product)
+- **Configurable masking:** optional categories plus mandatory protection for supported secret and token patterns. Original values are not restored into outputs.
+- **Structured requirements template:** one backend-owned, five-section template (`requirements`, version `1`).
+- **AI-powered gap analysis:** a separate review of missing or ambiguous information in the current draft.
+- **Iterative refinement with explicit approval:** targeted section proposals, visible conflict flags, and individual accept/reject decisions. Rejecting a proposal protects its section until suggestions are explicitly re-enabled.
+- **Session state and revision handling:** a canonical draft, question history, and revision checks help prevent stale updates. Manual edits remain local until an explicit operation synchronizes them.
+- **Markdown export:** download the reviewed snapshot as `requirements.md`, or copy its summary and description.
+- **Mock Jira submission:** create an in-memory demonstration ticket without contacting Jira.
 
-- **Context-aware analysis:** identifies potential gaps based on the type of task and the supplied information.
-- **Structured requirements:** generates business context, functional requirements, acceptance criteria, constraints, and relevant edge cases.
-- **Clarification questions:** distinguishes blocking questions from recommended and optional clarifications.
-- **Incremental refinement:** updates existing drafts without unnecessarily rewriting previously approved requirements.
-- **Sensitive-data masking:** configurable masking rules with a user-facing preview.
-- **Template-driven generation:** task structure is defined through configuration rather than hardcoded into the UI.
-- **Human-in-the-loop workflow:** the AI suggests improvements but does not invent or independently approve business decisions.
-- **Jira-ready output:** produces a structured task suitable for review and submission.
+## Architecture & Tech Stack
 
-## Technology Stack
+| Layer      | Implementation                                                                                                   |
+| ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| Frontend   | React, Vite, Mantine; step-based interface and requirements editor                                               |
+| Backend    | Python, FastAPI, Pydantic; separate orchestration, masking, refinement, validation, session, and adapter modules |
+| LLM        | OpenAI Responses API with Structured Outputs, or a deterministic local stub                                      |
+| State      | In-memory sessions and mock tickets; no persistent database                                                      |
+| Jira       | Mock adapter only; no real Jira integration                                                                      |
+| Deployment | Vercel (frontend) and Render (backend); runtime configuration has not been independently verified                |
 
-| Layer                   | Technology                                   |
-| ----------------------- | -------------------------------------------- |
-| Frontend                | React, JavaScript, Mantine, Vite             |
-| Backend                 | Python, FastAPI, Pydantic                    |
-| LLM integration         | OpenAI API                                   |
-| Orchestration           | Modular Python orchestration layer           |
-| Sensitive-data handling | Configurable masking rules                   |
-| Session management      | In-memory session store with TTL             |
-| Task templates          | Configuration-driven schemas                 |
-| Jira integration        | Adapter pattern, mock implementation for MVP |
+See the [technical overview](docs/TECHNICAL_OVERVIEW_RU.md) for detailed architecture, API behavior, and Mermaid diagrams.
 
-## Architecture
+## Getting Started
 
-The application uses a modular architecture separating the user interface, orchestration, sensitive-data processing, LLM integration, requirements validation, session management, and Jira integration.
+### Prerequisites
 
-The intended processing flow is:
+- Python 3.11+ with `pip` and `venv` (required by the installed dependency metadata). The repository does not pin a Python runtime version.
+- Node.js 22.13+ on the Node 22 release line, or Node.js 24+, with npm, to satisfy the locked frontend tooling requirements.
+- An OpenAI API key with access to the configured model only if using OpenAI mode. Stub mode requires no key or model network calls.
 
-`User Context → Masking → LLM Draft Generation → Completeness Analysis → Iterative Refinement → Final Review → Jira Adapter`
+The commands below use a POSIX shell and start from the repository root.
 
-Draft generation and completeness analysis are logically separate responsibilities.
-
-Refinement should be incremental: previously approved requirements must remain unchanged unless the user explicitly authorizes modifications.
-
-Sensitive data must be handled before external LLM requests. Supporting documentation is subject to the same security considerations as user-provided context.
-
-## Hackathon MVP
-
-The MVP focuses on demonstrating the complete requirements refinement workflow:
-
-- Enter unstructured context.
-- Configure and review sensitive-data masking.
-- Generate an initial structured task using an LLM.
-- Identify missing requirements and generate clarification questions.
-- Refine the draft through multiple iterations.
-- Preserve previously approved requirements.
-- Review and finalize the resulting task.
-- Simulate Jira ticket creation.
-- Reset the workflow after successful submission.
-
-### Current Implementation Status
-
-The prototype implements context input, configurable masking and preview review,
-a general-purpose requirements template, field editing, safe in-memory sessions,
-and mock Jira submission. Its one active template is `requirements`, version `1`.
-
-By default, generation is deterministic and offline: the first nonempty sanitized line becomes
-`summary`, the entire sanitized input becomes `requirements`, and the other fields
-remain empty. Users must supply missing business context and acceptance criteria.
-Task 5 adds iterative gap analysis, partial answers and explicit dispositions,
-section proposals, independent accept/reject decisions, and protected sections.
-The session owns the sanitized draft and revision; edits stay local until an action.
-The offline stub asks only about empty required fields and copies literal answers
-into empty sections. It does not perform semantic analysis. Configured OpenAI mode
-supports initial generation, gap analysis and targeted refinement through the same
-Responses API client and strict Structured Outputs. Jira remains mock-only.
-
-
-### Clarification API (requirements v1)
-
-- `POST /api/clarifications/analyze`: synchronize reviewed edits and return 0–5 questions.
-- `POST /api/clarifications/refine`: submit partial `answers` with `question_id`,
-  `status`, and literal `answer`; return proposals without applying them.
-- `POST /api/clarifications/decisions`: submit `batch_id` and individual
-  `{proposal_id, action: "accept"|"reject"}` decisions, or `allow_sections` to
-  re-enable suggestions. Rejections protect sections for the session.
-- `GET /api/sessions/{session_id}/refinement`: recover the current checkpoint;
-  does not refresh the 900-second session TTL.
-
-Mutations carry `session_id`, `template: {mode: "requirements", version: 1}`,
-`expected_revision`, a fresh client `request_id`, and the current five-field `draft`.
-Identical retries reuse their request ID; the last 32 successful IDs retain keyed
-request digests, never raw inputs. Reusing an ID with changed content or submitting
-an obsolete revision returns safe `409 REVISION_CONFLICT`. Recovery is explicit;
-local edits are preserved until the user chooses to replace them. All explicit
-question-status corrections are allowed; only `answered` carries answer text.
-Resolved normalized duplicates are suppressed unless changed associated sections
-provide new quoted evidence. Earlier dispositions remain in the ledger.
-The compact ledger retains decisions and answers for this ephemeral session only.
-
-Sanitization changes return `preview_review_required` with reviewed `draft` and
-`answers`; resubmit the sanitized content after reviewing it. A signed, sanitized
-`review_token` carries any history/proposal redactions into that retry without
-storing original values or a pending draft. Return the token with the reviewed
-mutation; its session and revision are verified, and the whole payload is rechecked. These responses do
-not commit a draft or refresh TTL. Successful mutations commit atomically and
-refresh TTL; failed operations do neither. A cancelled HTTP request can leave an
-admitted worker finishing successfully; recover via GET or retry the same request.
-
-Generation additionally returns `revision`. Task 5 submission adds
-`expected_revision` and `request_id` to `/api/create-ticket`; older clients can omit
-both. Submission consumes the session once, including after client cancellation;
-subsequent requests return `SESSION_UNAVAILABLE`, never another ticket. Before Jira,
-the UI previews unresolved/delegated additions to `open_questions`. Incorporating
-or declining them is explicit; neither choice blocks submission. No database
-migration is required; restart/regenerate old in-memory sessions.
-
-## Generation configuration and offline verification
-
-Backend environment configuration (restart the backend after changing it):
-
-| Variable | Behavior |
-| --- | --- |
-| `LLM_PROVIDER` | `stub` (default) or `openai`; unknown values fail application initialization. |
-| `OPENAI_API_KEY` | Required and nonempty only for `openai`; keep exclusively in the backend environment. |
-| `OPENAI_MODEL` | Only reviewed snapshot `gpt-5.4-mini-2026-03-17` is accepted; this is the default. Other model values fail closed. |
-
-Use `LLM_PROVIDER=stub` for offline development. For real generation, configure
-`LLM_PROVIDER=openai` and provide `OPENAI_API_KEY` securely in the backend environment
-or its local dotenv file. Never put credentials in frontend/Vite configuration.
-Application initialization validates the provider and key presence without a network
-request. It does not verify authentication or model access.
-
-OpenAI requests use a 60-second SDK timeout, zero automatic SDK retries, and
-`store=False`. There is no automatic fallback to the stub. Only sanitized context, current draft, question/answer state and static instructions
-cross the model boundary. User edits
-that introduce sensitive content require a revised preview confirmation first.
-
-The model must return exactly the five requirements-v1 string fields. Unsupported
-information remains empty; supplied expected behavior may be rewritten as acceptance
-criteria without adding facts. `open_questions` stays empty in Task 4. The backend
-validates and sanitizes output, owns template metadata, and computes `missing_fields`.
-Structured output and instructions do not guarantee factual accuracy: review the draft.
-
-Generation failures return safe `502 / LLM_GENERATION_FAILED`; timeouts return
-`504 / LLM_TIMEOUT`. Provider details are not displayed. The UI retains input and
-preview for retry. Failures neither consume the session nor refresh its 900-second
-TTL; an expired session uses existing restart behavior. Jira submission remains mock-only.
-
-Run offline verification from the repository root (backend tests mock OpenAI):
+### Backend: local stub mode
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend backend/.venv/bin/python -B -m unittest discover -s backend/tests -q
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+APP_ENV=development CORS_ALLOWED_ORIGINS=http://localhost:5173 LLM_PROVIDER=stub \
+  python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 \
+  --no-proxy-headers --no-access-log --log-level warning
 ```
 
-From `frontend`:
+Stub mode exercises the workflow offline: it copies the first nonempty context line into Summary and the full sanitized context into Requirements. It asks about empty required fields and proposes copying literal answers into empty sections. It does **not** perform semantic analysis; fill in missing Business Context and Acceptance Criteria yourself or through clarification answers.
+
+### Frontend
+
+In a second terminal, from the repository root:
 
 ```bash
-node --test src/api.test.js
-npm run lint
-npm run build
-```
-
-## Expected Impact
-
-Reprooo aims to improve the quality of requirements before development and testing.
-
-Potential effectiveness metrics include:
-
-- Reduction in clarification questions raised during QA.
-- Reduction in tasks returned for requirements clarification.
-- Time required to prepare development-ready tasks.
-- Number and severity of missing requirements identified before development.
-- Number of refinement iterations per task.
-- Frequency of changes to acceptance criteria after development begins.
-
-These are proposed evaluation metrics, not measured outcomes of the current prototype.
-
-## Future Development
-
-- **Knowledge base:** reusable specifications, documentation, and team-specific requirements.
-- **Team and service context:** automatically retrieve relevant documentation based on the selected team or service.
-- **Repository integration:** use relevant technical specifications and code context when analyzing requirements.
-- **Specification generation:** preserve technical specifications alongside pull requests.
-- **Real Jira Cloud integration:** create and update tasks directly.
-- **Slack integration:** import discussions without manual copying.
-- **Organizational learning:** reuse previously identified requirement gaps, clarification patterns, and team conventions.
-- **Company-approved LLM providers:** support deployment using approved internal or external models.
-- **Analytics:** measure requirements quality and refinement effectiveness.
-
-## Project Documentation
-
-For detailed product requirements, architectural decisions, MVP boundaries, and acceptance criteria, see:
-
-- [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) — product vision, target workflow, and requirements.
-- [`AGENTS.md`](AGENTS.md) — repository instructions for AI coding agents.
-
-These documents should be consulted before implementing significant changes to the application.
-
-## Current masking security boundaries
-
-Credentials matching supported password/API-key assignments, quoted assignments,
-JWT/provider-token patterns, and Basic/Bearer Authorization formats are redacted
-before generation and mock ticket storage. Detected values repeated within one
-processing operation are also redacted. Arbitrary unlabeled values and unknown
-credential formats are outside this detection guarantee.
-
-Session masking state stores rule choices and placeholder/category metadata, not
-original values. No category is restored at this stage. Selective restoration
-remains planned for final review and will require a category-specific policy and
-explicit confirmation; personal data stays masked by default. Optional masking
-chips remain configurable, while credential rules cannot be disabled.
-
-Editing a preview triggers another backend check. If it changes the text, the
-updated preview must be reviewed and submitted again before generation. The
-default generator is an offline stub; explicitly configured OpenAI mode is available.
-Session validity and the expiry lifecycle are implemented as described below.
-
-Synthetic-only backend verification (using existing environment dependencies):
-
-```sh
-PYTHONPATH=backend backend/.venv/bin/python -m unittest discover -s backend/tests -v
-```
-
-## In-memory session lifecycle
-
-Sessions expire after 900 seconds without a successful session-backed operation.
-Generation and sanitized-preview review refresh the deadline from completion;
-failures, lookups, cleanup, and passive browser editing do not. Successful mock
-submission consumes the session; explicit deletion removes it. A session is
-expired at its deadline, not one instant later.
-
-The three session-dependent API handlers admit requests asynchronously after
-request validation and before scheduling synchronous worker execution. This is
-API admission time, not exact HTTP socket arrival time. Eligibility is frozen
-against the deadline at admission: requests arriving at this step after expiry
-are rejected even while earlier work is running. An admitted request can wait
-for worker capacity and its session lock, then finish after the original deadline.
-It still must refer to the same session, not a deleted or consumed entry.
-
-A reservation pins each admitted operation against cleanup. Pending reservations
-belong to the API; cancellation releases unused admission without refreshing TTL.
-Once a worker claims a reservation, it owns release until processing finishes,
-including while it waits for the session lock. Cancelling the HTTP await cannot
-release that worker's pin or interrupt it midway through a session update.
-Already running work may still succeed (and refresh or consume the session) after
-the client stops waiting. Release is exactly once. Processing uses private masking
-metadata; failed work publishes no partial updates. Requests for one session are
-serialized, with no global lock held during generation or Jira processing.
-
-FastAPI lifespan performs an initial sweep and starts one cleanup task running
-every 30 seconds. It skips admitted work without waiting on operation locks. The
-task is cancelled and awaited on shutdown. Storage is single-process and lost
-on restart; use one application worker for the demo.
-
-Unknown, expired, deleted, and consumed session IDs return HTTP 404 with
-`detail.code = SESSION_UNAVAILABLE`. Missing or malformed IDs return safe HTTP
-422 `INVALID_REQUEST` errors. The UI disables further session actions while
-keeping the visible preview/draft. Explicit restart preserves the original
-context and masking selections, but discards the old preview/draft. No browser
-storage, heartbeat, automatic draft migration, or live integration is added.
-
-Frontend checks (from `frontend`):
-
-```sh
-node --test src/api.test.js
-npm run lint
-npm run build
-```
-
-## Requirements template v1 and API migration
-
-The backend-owned registry publishes exactly one active template through
-`GET /api/templates/requirements`. The response includes `mode`, `version`, and
-an ordered list of fields, labels, hints, and required flags:
-
-| Field ID | UI label | Required for submission |
-| --- | --- | --- |
-| `summary` | Краткое описание | Yes |
-| `business_context` | Бизнес-контекст | Yes |
-| `requirements` | Требования | No |
-| `acceptance_criteria` | Критерии приёмки | Yes |
-| `open_questions` | Открытые вопросы | No |
-
-All five fields are plain text. Acceptance criteria and open questions may use
-newline-separated bullets; there are no structured question objects or approval
-states. Requirements may include known constraints and error cases. Unconfirmed
-business details must remain unknown rather than be filled with `TBD` or invented
-content. `missing_fields` checks required-field emptiness, not semantic readiness.
-
-Generation keeps the `draft` and `missing_fields` properties and adds the exact
-reference used for that draft:
-
-```json
-{
-  "template": {"mode": "requirements", "version": 1},
-  "draft": {
-    "summary": "Add a test-message button",
-    "business_context": "",
-    "requirements": "Add a test-message button\nPlace it in service settings.",
-    "acceptance_criteria": "",
-    "open_questions": ""
-  },
-  "missing_fields": ["business_context", "acceptance_criteria"]
-}
-```
-
-Submission requires that reference alongside the edited draft:
-
-```json
-{
-  "session_id": "AAAAAAAAAAAAAAAAAAAAAA",
-  "template": {"mode": "requirements", "version": 1},
-  "draft": {
-    "summary": "Add a test-message button",
-    "business_context": "Allow operators to verify message delivery.",
-    "requirements": "Add the button in service settings.",
-    "acceptance_criteria": "Clicking the button sends one test message.",
-    "open_questions": ""
-  }
-}
-```
-
-The backend rejects unknown field IDs, non-string values, and unsupported template
-references without echoing submitted content. Missing allowed fields normalize to
-empty strings in template order. Empty required fields are allowed during generation,
-but empty or whitespace-only required submission fields fail with HTTP 422.
-Structural/reference errors use safe `INVALID_REQUEST` responses; incomplete drafts
-retain the existing `missing_fields` error. Invalid submissions do not consume the
-session or refresh its TTL. Template compatibility is checked inside the admitted
-operation. The existing preview-review and session-unavailable contracts are unchanged.
-
-This is a coordinated frontend/backend API migration: the old `bug` template and
-`title` field are not aliases. Older clients/drafts must be reloaded and regenerated;
-there is no automatic field conversion or historical-template support. `summary`
-maps to mock Jira Summary; nonempty remaining sections appear in configured order.
-A template's version identifies its structure, not a draft revision.
-
-The editor verifies the loaded template against the generated reference. If loading
-fails or metadata differs, the generated draft remains in local React state for
-an explicit retry. No replacement session or draft is created automatically.
-
-## Production connectivity (Task 7.2)
-
-Local development needs no new configuration: the frontend uses
-`http://localhost:8000` and the backend allows `http://localhost:5173`.
-Example files list variable names only; fill their blank values before use rather
-than copying them unchanged.
-
-On **Vercel**, set `VITE_API_BASE_URL=https://api.example.com` before building.
-It must be an explicit HTTPS backend URL; missing or invalid values fail the build.
-Trailing slashes are removed; an optional base path is supported. URLs containing
-credentials, query strings, or fragments are rejected. Rebuild after changing it.
-Custom Vite build modes require this setting too.
-
-On **Render**, set `APP_ENV=production` and
-`CORS_ALLOWED_ORIGINS=https://demo.example.com`.
-Multiple exact origins can be comma-separated. Production requires HTTPS origins;
-missing, blank, malformed, wildcard, or localhost production values fail application
-initialization. Origins cannot contain paths or trailing slashes. Explicit configuration
-replaces the local default; include local origins only in development configuration
-when needed. No Vercel preview domains are allowed automatically. Credentials remain
-disabled, with existing allowed methods and headers unchanged.
-
-`APP_ENV` defaults to `development` and only accepts `development` or `production`.
-`CORS_ALLOWED_ORIGINS` defaults to the local Vite origin only when unset in development.
-Set production mode explicitly on Render; it is not inferred from the hosting service.
-
-OpenAI API keys belong only in backend environment settings. **Never put keys or other
-secrets in `VITE_*` variables**: Vite embeds these values in public browser assets.
-The public API URL is not a secret. CORS controls browser access, not authentication
-or abuse prevention. Public API protection and resource limits remain required before
-deployment. This task adds no deployment files or live integrations.
-
-Connectivity verification (synthetic data, no live OpenAI calls):
-
-```sh
 cd frontend
-node --test src/*.test.js
-npm run lint
-VITE_API_BASE_URL=https://api.example.com npm run build
-# Without VITE_API_BASE_URL, a build is expected to fail.
+npm ci
+npm run dev -- --host localhost --port 5173 --strictPort
 ```
 
-Run the backend suite from the repository root using the command documented above.
+Open [the local frontend](http://localhost:5173). The development API URL defaults to `http://localhost:8000`; the backend allows the frontend origin `http://localhost:5173` by default. The [health endpoint](http://localhost:8000/api/health) checks the API handler, not OpenAI access or available usage budget.
 
-## Demo request and memory limits
+### Environment configuration
 
-Task 7.3.1 adds a 256 KiB pre-parser HTTP body limit, bounded schemas and refinement
-history, and atomic 100-session / 100-mock-ticket capacity limits. See
-[request and memory limits](docs/REQUEST_MEMORY_LIMITS.md) for exact budgets,
-configuration, rejection contracts, receipt sizing, frontend behavior and risks.
+No environment file is required for the stub commands above. These are the main settings:
 
-### Public demo abuse protection (Task 7.3.2)
+| Variable               | Where        | Local value or behavior                                                                                    |
+| ---------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
+| `LLM_PROVIDER`         | Backend      | `stub` by default; `openai` enables model-backed generation, analysis, and refinement                      |
+| `OPENAI_API_KEY`       | Backend only | Required only in OpenAI mode; supply privately, never in frontend configuration                            |
+| `OPENAI_MODEL`         | Backend      | `gpt-5.4-mini-2026-03-17`, the default and only allowed model profile                                      |
+| `APP_ENV`              | Backend      | `development` by default                                                                                   |
+| `CORS_ALLOWED_ORIGINS` | Backend      | `http://localhost:5173` when unset in development; explicit values replace the default                     |
+| `VITE_API_BASE_URL`    | Frontend     | Optional in development; defaults to `http://localhost:8000`. Builds require an explicit HTTPS backend URL |
 
-See [the abuse protection policy](docs/ABUSE_PROTECTION.md) for exact quotas,
-production logging/start command, Render proxy verification, and accounting assumptions.
-The $4 conservative reservation ledger is **in memory per backend process lifetime**.
-It resets on restart and does **not** guarantee $5 total demo spend. Use a dedicated
-OpenAI project/key and independent provider-side usage monitoring; budget alerts
-are not hard spending limits. No automatic retries or live integration changes.
+The backend supports local dotenv loading. The existing `backend/.env.example` and `frontend/.env.example` document configuration, but blank backend `APP_ENV` and `CORS_ALLOWED_ORIGINS` entries are not valid defaults: fill them in or omit them rather than copying unchanged. Never put API keys or other secrets in `VITE_*` variables; they are exposed in browser assets.
+
+### Enable OpenAI mode
+
+Stop the backend, securely provide `OPENAI_API_KEY` in its environment or a private `backend/.env` file, then restart from `backend` with the virtual environment active:
+
+```bash
+APP_ENV=development CORS_ALLOWED_ORIGINS=http://localhost:5173 \
+  LLM_PROVIDER=openai OPENAI_MODEL=gpt-5.4-mini-2026-03-17 \
+  python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 \
+  --no-proxy-headers --no-access-log --log-level warning
+```
+
+The key is deliberately omitted from the command. Startup validates configuration and key presence without verifying provider access. Model failures do not automatically fall back to the stub. Restart the backend after changing its configuration.
+
+## Current MVP Limitations
+
+- **Mock Jira only:** tickets exist in backend memory; returned Jira links are demonstration URLs.
+- **No user authentication:** this is a demo, without user accounts or access controls.
+- **No persistent storage:** sessions, refinement history, mock tickets, and usage counters are lost on backend restart. Reloading the browser does not automatically restore the draft.
+- **Expiring sessions:** the sliding TTL is 900 seconds after successful session-changing operations. Passive editing and reading session state do not extend it.
+- **Single-process architecture:** run one backend process and instance. Sessions, locks, and quotas are not shared across workers.
+- **Rule-based masking:** original input reaches the Reprooo backend before masking. Detection does not guarantee removal of all confidential information; inspect previews and use synthetic data for public testing.
+- **Bounded OpenAI usage:** limits include 12 paid dispatches per session, two concurrent model calls, request throttling, and a conservative $4 reservation budget per process lifetime. The budget resets on restart and is not a total spending guarantee. See the [abuse protection policy](docs/ABUSE_PROTECTION.md) for details.
+- **Human review required:** structured output validation does not establish factual correctness or complete requirements. Review model-generated drafts, questions, and proposals.
+
+## Documentation
+
+Both detailed guides are in Russian:
+
+- [Technical Overview](docs/TECHNICAL_OVERVIEW_RU.md) — architecture and Mermaid diagrams, modules, API workflow, security boundaries, and operational limitations.
+- [Defense Cheatsheet](docs/DEFENSE_CHEATSHEET_RU.md) — concise technical Q&A for presenting the MVP and explaining its design decisions and limitations.
